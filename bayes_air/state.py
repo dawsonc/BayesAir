@@ -3,10 +3,10 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from bayes_air.components.aircraft import Aircraft
-from bayes_air.components.airport import Airport
-from bayes_air.components.types import AirportCode, Time
+from bayes_air.aircraft import Aircraft
+from bayes_air.airport import Airport
 from bayes_air.schedule import parse_itinerary_item
+from bayes_air.util import AirportCode, Time
 
 
 @dataclass

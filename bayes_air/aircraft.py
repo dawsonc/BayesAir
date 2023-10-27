@@ -1,8 +1,8 @@
 """Define a class representing an aircraft."""
 from dataclasses import dataclass
 
-from bayes_air.components.types import TailNumber
 from bayes_air.schedule import ItineraryItem
+from bayes_air.util import TailNumber
 
 
 @dataclass
