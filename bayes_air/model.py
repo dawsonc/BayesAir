@@ -249,32 +249,3 @@ def air_traffic_network_model(state: State, T: float = 24.0, delta_t: float = 0.
     # Once we're done, return the state (this will include the actual arrival/departure
     # times for each aircraft)
     return state
-
-
-if __name__ == "__main__":
-    import pandas as pd
-
-    from bayes_air.state import parse_schedule
-
-    # Define a simple schedule that sends the aircraft from airport 0 to airport 1 and back
-    # Time is defined in hours from the start of the simulation
-    schedule = pd.DataFrame(
-        {
-            "tail_number": ["N1", "N1"],
-            "origin_airport": ["A1", "A2"],
-            "destination_airport": ["A2", "A1"],
-            "scheduled_departure_time": [0.0, 1.5],
-            "scheduled_arrival_time": [1.0, 3.0],
-            "actual_departure_time": [None, None],
-            "actual_arrival_time": [None, None],
-        }
-    )
-
-    state = parse_schedule(schedule)
-    rendered_model = pyro.render_model(
-        air_traffic_network_model,
-        model_args=(state, 5.0, 0.1),
-        render_params=True,
-        render_distributions=True,
-    )
-    rendered_model.render(directory="tmp", view=True)
