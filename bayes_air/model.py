@@ -42,23 +42,33 @@ def air_traffic_network_model(state: State, T: float = 24.0, delta_t: float = 0.
         for destination in airport_codes
         if origin != destination
     }
+    crew_availability = {
+        code: pyro.sample(f"{code}_initial_crew_availability", dist.Normal(20, 5))
+        for code in airport_codes
+    }
 
     # Make a copy of the state so we don't change the input state
     state = copy.deepcopy(state)
 
-    # Simulate the movement of aircraft within the system for a fixed period of time
+    # Simulate the movement of aircraft and people within the system for a fixed period of time
     t = 0.0
+
+    #Initializing all available crew by sampling the latent crew parameter
+    for code in airport_codes:
+        airport.number_of_available_crew = crew_availability[code]
+
     for _ in pyro.markov(range(int(T // delta_t))):
         # Update the current time
         t += delta_t
 
         # Parked aircraft that are ready to depart move to the runway service queue.
         # An aircraft is ready to depart if the current time is greater than its
-        # earliest possible departure time.
+        # earliest possible departure time and if there is sufficient crew.
         for airport in state.airports.values():
             new_parked_aircraft = []
             for aircraft, earliest_departure_time in airport.parked_aircraft:
-                if t >= earliest_departure_time:
+                #Checking if there is sufficient crew
+                if t >= earliest_departure_time and airport.number_of_available_crew >= 3:
                     # logging.debug(f"(t={t:.2f}) {aircraft} is ready to depart from {airport.code}; moving to queue")
                     # TODO can queue items be a dataclass?
                     airport.runway_queue.append(
@@ -70,6 +80,9 @@ def air_traffic_network_model(state: State, T: float = 24.0, delta_t: float = 0.
                             None,  # no service time yet
                         ]
                     )
+                    #Removing the number of available crew from the integer value
+                    airport.number_of_available_crew -= 3
+                # TODO is there a way to not add it to the list?
                 else:
                     new_parked_aircraft.append((aircraft, earliest_departure_time))
 
@@ -245,6 +258,9 @@ def air_traffic_network_model(state: State, T: float = 24.0, delta_t: float = 0.
 
                         # Mark the aircraft as being on the next leg of its itinerary
                         aircraft.advance_itinerary()
+
+                        #Add crew repository back when it has been serviced from the airport queue after it lands.
+                        airport.number_of_available_crew += 3
 
     # Once we're done, return the state (this will include the actual arrival/departure
     # times for each aircraft)

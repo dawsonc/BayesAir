@@ -33,7 +33,7 @@ def parse_schedule(schedule_df: pd.DataFrame) -> State:
         [schedule_df["origin_airport"], schedule_df["destination_airport"]]
     ).unique()
     airports = {
-        airport_code: Airport(code=airport_code, runway_queue=[], parked_aircraft=[])
+        airport_code: Airport(code=airport_code, runway_queue=[], parked_aircraft=[], number_of_available_crew = 0)
         for airport_code in airport_codes
     }
 
