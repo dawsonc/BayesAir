@@ -1,0 +1,39 @@
+digraph {
+	A1_mean_turnaround_time [label=A1_mean_turnaround_time fillcolor=white shape=ellipse style=filled]
+	A2_mean_turnaround_time [label=A2_mean_turnaround_time fillcolor=white shape=ellipse style=filled]
+	A1_mean_service_time [label=A1_mean_service_time fillcolor=white shape=ellipse style=filled]
+	A2_mean_service_time [label=A2_mean_service_time fillcolor=white shape=ellipse style=filled]
+	travel_time_A1_A2 [label=travel_time_A1_A2 fillcolor=white shape=ellipse style=filled]
+	travel_time_A2_A1 [label=travel_time_A2_A1 fillcolor=white shape=ellipse style=filled]
+	F1_A1_A2_departure_service_time [label=F1_A1_A2_departure_service_time fillcolor=white shape=ellipse style=filled]
+	F1_A1_A2_actual_departure_time [label=F1_A1_A2_actual_departure_time fillcolor=white shape=ellipse style=filled]
+	F1_A1_A2_travel_time [label=F1_A1_A2_travel_time fillcolor=white shape=ellipse style=filled]
+	F1_A1_A2_arrival_service_time [label=F1_A1_A2_arrival_service_time fillcolor=white shape=ellipse style=filled]
+	F1_A1_A2_actual_arrival_time [label=F1_A1_A2_actual_arrival_time fillcolor=white shape=ellipse style=filled]
+	F1_A1_A2_turnaround_time [label=F1_A1_A2_turnaround_time fillcolor=white shape=ellipse style=filled]
+	F1_A2_A1_departure_service_time [label=F1_A2_A1_departure_service_time fillcolor=white shape=ellipse style=filled]
+	F1_A2_A1_actual_departure_time [label=F1_A2_A1_actual_departure_time fillcolor=white shape=ellipse style=filled]
+	F1_A2_A1_travel_time [label=F1_A2_A1_travel_time fillcolor=white shape=ellipse style=filled]
+	F1_A2_A1_arrival_service_time [label=F1_A2_A1_arrival_service_time fillcolor=white shape=ellipse style=filled]
+	F1_A2_A1_actual_arrival_time [label=F1_A2_A1_actual_arrival_time fillcolor=white shape=ellipse style=filled]
+	F1_A2_A1_turnaround_time [label=F1_A2_A1_turnaround_time fillcolor=white shape=ellipse style=filled]
+	A1_mean_service_time -> F1_A1_A2_departure_service_time
+	F1_A1_A2_departure_service_time -> F1_A1_A2_actual_departure_time
+	travel_time_A1_A2 -> F1_A1_A2_travel_time
+	A2_mean_service_time -> F1_A1_A2_arrival_service_time
+	F1_A1_A2_travel_time -> F1_A1_A2_actual_arrival_time
+	F1_A1_A2_actual_departure_time -> F1_A1_A2_actual_arrival_time
+	F1_A1_A2_arrival_service_time -> F1_A1_A2_actual_arrival_time
+	A2_mean_turnaround_time -> F1_A1_A2_turnaround_time
+	A2_mean_service_time -> F1_A2_A1_departure_service_time
+	F1_A2_A1_departure_service_time -> F1_A2_A1_actual_departure_time
+	F1_A1_A2_actual_arrival_time -> F1_A2_A1_actual_departure_time
+	F1_A1_A2_turnaround_time -> F1_A2_A1_actual_departure_time
+	travel_time_A2_A1 -> F1_A2_A1_travel_time
+	A1_mean_service_time -> F1_A2_A1_arrival_service_time
+	F1_A2_A1_travel_time -> F1_A2_A1_actual_arrival_time
+	F1_A2_A1_arrival_service_time -> F1_A2_A1_actual_arrival_time
+	F1_A2_A1_actual_departure_time -> F1_A2_A1_actual_arrival_time
+	A1_mean_turnaround_time -> F1_A2_A1_turnaround_time
+	distribution_description_node [label="A1_mean_turnaround_time ~ Normal\lA2_mean_turnaround_time ~ Normal\lA1_mean_service_time ~ Normal\lA2_mean_service_time ~ Normal\ltravel_time_A1_A2 ~ Normal\ltravel_time_A2_A1 ~ Normal\lF1_A1_A2_departure_service_time ~ Exponential\lF1_A1_A2_actual_departure_time ~ Normal\lF1_A1_A2_travel_time ~ Normal\lF1_A1_A2_arrival_service_time ~ Exponential\lF1_A1_A2_actual_arrival_time ~ Normal\lF1_A1_A2_turnaround_time ~ Normal\lF1_A2_A1_departure_service_time ~ Exponential\lF1_A2_A1_actual_departure_time ~ Normal\lF1_A2_A1_travel_time ~ Normal\lF1_A2_A1_arrival_service_time ~ Exponential\lF1_A2_A1_actual_arrival_time ~ Normal\lF1_A2_A1_turnaround_time ~ Normal\l" shape=plaintext]
+}
