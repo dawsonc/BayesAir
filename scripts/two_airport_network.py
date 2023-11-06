@@ -39,7 +39,7 @@ def main():
         render_params=True,
         render_distributions=True,
     )
-    model_graph.render(view=True)
+    model_graph.render("tmp/two_airport_one_aircraft", view=True)
     
 
 
