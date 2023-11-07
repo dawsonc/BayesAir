@@ -1,5 +1,4 @@
 """Define a probabilistic model for an air traffic network."""
-import copy
 
 import pyro
 import pyro.distributions as dist

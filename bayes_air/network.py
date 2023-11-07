@@ -55,18 +55,24 @@ class NetworkState:
             if (
                 flight.scheduled_departure_time <= time
                 and self.airports[flight.origin].num_available_aircraft > 0
+                and self.airports[flight.origin].num_available_crew > 0
             ):
-                # Remove the aircraft from the airport
-                turnaround_time = self.airports[flight.origin].available_aircraft.pop(0)
+                # Remove the aircraft and crew from the airport
+                aircraft_turnaround_t = self.airports[
+                    flight.origin
+                ].available_aircraft.pop(0)
+                crew_turnaround_t = self.airports[flight.origin].available_crew.pop(0)
 
                 # Add the flight to the list of flights ready to depart
                 ready_to_depart_flights.append(flight)
 
                 # Get the time at which this flight was ready to depart (the later
                 # of the scheduled departure time and the turnaround ready time)
-                ready_times.append(
-                    torch.maximum(turnaround_time, flight.scheduled_departure_time)
+                ready_time = torch.maximum(
+                    aircraft_turnaround_t, flight.scheduled_departure_time
                 )
+                ready_time = torch.maximum(ready_time, crew_turnaround_t)
+                ready_times.append(ready_time)
             else:
                 # Add the flight to the new pending flights list
                 new_pending_flights.append(flight)
@@ -104,7 +110,9 @@ class NetworkState:
             )
 
             # Add the flight to the in-transit flights list
-            self.in_transit_flights.append((flight, flight.actual_departure_time + travel_time))
+            self.in_transit_flights.append(
+                (flight, flight.actual_departure_time + travel_time)
+            )
 
     def add_completed_flights(self, landing_flights: list[Flight]) -> None:
         """Add a list of flights to the completed flights list.

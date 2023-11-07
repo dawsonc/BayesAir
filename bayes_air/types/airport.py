@@ -45,6 +45,8 @@ class Airport:
             ready for its next departure.
         available_aircraft: a list of times at which aircraft became available (after
             turnaround).
+        available_crew: a list of times at which crew become available (after
+            turnaround). Treats crew for 1 aircraft as a single unit.
     """
 
     code: AirportCode
@@ -55,11 +57,17 @@ class Airport:
     runway_queue: list[QueueEntry] = field(default_factory=list)
     turnaround_queue: list[Time] = field(default_factory=list)
     available_aircraft: list[Time] = field(default_factory=list)
+    available_crew: list[Time] = field(default_factory=list)
 
     @property
     def num_available_aircraft(self) -> int:
         """Return the number of available aircraft"""
         return len(self.available_aircraft)
+
+    @property
+    def num_available_crew(self) -> int:
+        """Return the number of available crew"""
+        return len(self.available_crew)
 
     def update_available_aircraft(self, time: Time) -> None:
         """Update the number of available aircraft by checking the turnaround queue.
@@ -72,6 +80,7 @@ class Airport:
             if turnaround_time <= time:
                 # The aircraft is ready to depart, so add it to the available aircraft
                 self.available_aircraft.append(turnaround_time)
+                self.available_crew.append(turnaround_time)
             else:
                 # The aircraft is not yet ready to depart, so add it to the new
                 # turnaround queue
