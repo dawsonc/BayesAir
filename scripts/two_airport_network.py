@@ -27,6 +27,7 @@ def main():
     )
     flights, airports = parse_schedule(schedule)
     airports[0].available_aircraft.append(torch.tensor(0.0))
+    airports[0].available_crew.append(torch.tensor(0.0))
     state = NetworkState(
         airports={airport.code: airport for airport in airports},
         pending_flights=flights,
