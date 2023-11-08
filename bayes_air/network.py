@@ -17,7 +17,7 @@ class NetworkState:
     Attributes:
         airports: A dictionary mapping airport codes to Airport objects.
         pending_flights: A list of flights that have not yet departed, sorted by
-            scheduled departure time.
+            scheduled departure time. Will be sorted after initialization.
         in_transit_flights: A list of flights that are currently in the air, along with
             the time at which they will arrive at their destination.
         completed_flights: A list of flights that have completed their journeys.
@@ -87,6 +87,7 @@ class NetworkState:
         departing_flights: list[Flight],
         travel_times: dict[tuple[AirportCode, AirportCode], Time],
         travel_time_variation: Union[torch.tensor, float],
+        var_prefix: str = "",
     ) -> None:
         """Add a list of flights to the in-transit flights list.
 
@@ -95,13 +96,14 @@ class NetworkState:
             travel_times: A dictionary mapping origin-destination pairs to nominal
                 travel times.
             travel_time_variation: The fractional variation in travel time.
+            var_prefix: prefix for sampled variable names.
         """
         # For each departing flight, sample a travel time and then add it to the
         # in-transit flights list
         for flight in departing_flights:
             # Sample a travel time
             nominal_travel_time = travel_times[flight.origin, flight.destination]
-            var_name = str(flight) + "_travel_time"
+            var_name = var_prefix + str(flight) + "_travel_time"
             travel_time = pyro.sample(
                 var_name,
                 dist.Normal(

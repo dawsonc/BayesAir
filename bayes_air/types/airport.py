@@ -89,11 +89,14 @@ class Airport:
         # Update the turnaround queue
         self.turnaround_queue = new_turnaround_queue
 
-    def update_runway_queue(self, time: Time) -> tuple[list[Flight], list[Flight]]:
+    def update_runway_queue(
+        self, time: Time, var_prefix: str = ""
+    ) -> tuple[list[Flight], list[Flight]]:
         """Update the runway queue by removing flights that have been serviced.
 
         Args:
             time: The current time.
+            var_prefix: the prefix for sampled variable names
 
         Returns: a list of flights that have departed and a list of flights that have
             landed.
@@ -108,7 +111,7 @@ class Airport:
             # If no service time is assigned, assign one now by sampling from
             # the service time distribution
             if self.runway_queue[0].assigned_service_time is None:
-                self._assign_service_time(self.runway_queue[0], time)
+                self._assign_service_time(self.runway_queue[0], time, var_prefix)
 
             # If the service time has elapsed, it takes off or lands
             if self.runway_queue[0].assigned_service_time <= time:
@@ -119,26 +122,29 @@ class Airport:
                 if departing:
                     # Takeoff! Assign a departure time and add the flight to the
                     # list of departed flights
-                    self._assign_departure_time(queue_entry)
+                    self._assign_departure_time(queue_entry, var_prefix)
                     departed_flights.append(flight)
                 else:
                     # Landing! Assign an arrival time and add the aircraft to the
                     # turnaround queue
-                    self._assign_arrival_time(queue_entry)
-                    self._assign_turnaround_time(flight)
+                    self._assign_arrival_time(queue_entry, var_prefix)
+                    self._assign_turnaround_time(flight, var_prefix)
                     landed_flights.append(flight)
 
         return departed_flights, landed_flights
 
-    def _assign_service_time(self, queue_entry: QueueEntry, time: Time) -> None:
+    def _assign_service_time(
+        self, queue_entry: QueueEntry, time: Time, var_prefix: str = ""
+    ) -> None:
         """Sample a random service time for an entry in the runway queue.
 
         Args:
             queue_entry: The queue entry to assign a service time to.
             time: The current time.
+            var_prefix: prefix for sampled variable names.
         """
         departing = queue_entry.flight.origin == self.code
-        var_name = str(queue_entry.flight)
+        var_name = var_prefix + str(queue_entry.flight)
         var_name += "_departure" if departing else "_arrival"
         var_name += "_service_time"
         service_time = pyro.sample(
@@ -153,16 +159,21 @@ class Airport:
                 other_queue_entry.total_wait_time + service_time
             )
 
-    def _assign_departure_time(self, queue_entry: QueueEntry) -> None:
+    def _assign_departure_time(
+        self,
+        queue_entry: QueueEntry,
+        var_prefix: str = "",
+    ) -> None:
         """Sample a random departure time for a flight that is using the runway.
 
         If an actual departure time has been observed, then condition on that.
 
         Args:
             queue_entry: The queue entry for the flight to assign a departure time to.
+            var_prefix: prefix for sampled variable names.
         """
         queue_entry.flight.actual_departure_time = pyro.sample(
-            str(queue_entry.flight) + "_actual_departure_time",
+            var_prefix + str(queue_entry.flight) + "_actual_departure_time",
             dist.Normal(
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
@@ -170,16 +181,19 @@ class Airport:
             obs=queue_entry.flight.actual_departure_time,
         )
 
-    def _assign_arrival_time(self, queue_entry: QueueEntry) -> None:
+    def _assign_arrival_time(
+        self, queue_entry: QueueEntry, var_prefix: str = ""
+    ) -> None:
         """Sample a random arrival time for a flight that is using the runway.
 
         If an actual arrival time has been observed, then condition on that.
 
         Args:
             queue_entry: The queue entry for the flight to assign a arrival time to.
+            var_prefix: prefix for sampled variable names.
         """
         queue_entry.flight.actual_arrival_time = pyro.sample(
-            str(queue_entry.flight) + "_actual_arrival_time",
+            var_prefix + str(queue_entry.flight) + "_actual_arrival_time",
             dist.Normal(
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
@@ -187,14 +201,15 @@ class Airport:
             obs=queue_entry.flight.actual_arrival_time,
         )
 
-    def _assign_turnaround_time(self, flight: Flight) -> None:
+    def _assign_turnaround_time(self, flight: Flight, var_prefix: str = "") -> None:
         """Sample a random turnaround time for an arrived aircraft.
 
         Args:
             flight: The flight to assign a turnaround time to.
+            var_prefix: prefix for sampled variable names.
         """
         turnaround_time = pyro.sample(
-            str(flight) + "_turnaround_time",
+            var_prefix + str(flight) + "_turnaround_time",
             dist.Normal(self.mean_turnaround_time, self.turnaround_time_std_dev),
         )
         self.turnaround_queue.append(flight.actual_arrival_time + turnaround_time)

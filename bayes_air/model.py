@@ -32,7 +32,7 @@ def air_traffic_network_model(
         for code in airport_codes
     }
     airport_service_times = {
-        code: pyro.sample(f"{code}_mean_service_time", dist.Normal(9.0 / 60, 3.0 / 60))
+        code: pyro.sample(f"{code}_mean_service_time", dist.Uniform(0.0, 0.1))
         for code in airport_codes
     }
     travel_times = {
@@ -46,8 +46,9 @@ def air_traffic_network_model(
 
     # Simulate for each state
     output_states = []
-    for ind in pyro.plate("days", len(states)):
-        state = states[ind]
+    for day_ind in pyro.markov(range(len(states))):
+        state = states[day_ind]
+        var_prefix = f"day{day_ind}_"
 
         # Assign the latent variables to the airports
         for airport in state.airports.values():
@@ -77,12 +78,14 @@ def air_traffic_network_model(
 
             # All flights that are using the runway get serviced
             for airport in state.airports.values():
-                departed_flights, landing_flights = airport.update_runway_queue(t)
+                departed_flights, landing_flights = airport.update_runway_queue(
+                    t, var_prefix
+                )
 
                 # Departing flights get added to the in-transit list, while landed flights
                 # get added to the completed list
                 state.add_in_transit_flights(
-                    departed_flights, travel_times, travel_time_variation
+                    departed_flights, travel_times, travel_time_variation, var_prefix
                 )
                 state.add_completed_flights(landing_flights)
 

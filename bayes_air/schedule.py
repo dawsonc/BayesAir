@@ -1,7 +1,7 @@
 """Define methods for working with schedules."""
 import pandas as pd
 
-from bayes_air.types import Airport, Flight
+from bayes_air.types import Airport, Flight, Time
 
 
 # Parse the provided data into our custom data structures
@@ -33,10 +33,14 @@ def parse_flight(schedule_row: tuple) -> Flight:
         flight_number=flight_number,
         origin=origin_airport,
         destination=destination_airport,
-        scheduled_departure_time=scheduled_departure_time,
-        scheduled_arrival_time=scheduled_arrival_time,
-        actual_departure_time=actual_departure_time,
-        actual_arrival_time=actual_arrival_time,
+        scheduled_departure_time=Time(scheduled_departure_time),
+        scheduled_arrival_time=Time(scheduled_arrival_time),
+        actual_departure_time=Time(actual_departure_time)
+        if actual_departure_time is not None
+        else None,
+        actual_arrival_time=Time(actual_arrival_time)
+        if actual_arrival_time is not None
+        else None,
     )
 
 
