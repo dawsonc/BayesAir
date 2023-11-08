@@ -19,8 +19,8 @@ def main():
             "flight_number": ["F1", "F1"],
             "origin_airport": ["A1", "A2"],
             "destination_airport": ["A2", "A1"],
-            "scheduled_departure_time": [torch.tensor(0.0), torch.tensor(1.5)],
-            "scheduled_arrival_time": [torch.tensor(1.0), torch.tensor(3.0)],
+            "scheduled_departure_time": [0.0, 1.5],
+            "scheduled_arrival_time": [1.0, 3.0],
             "actual_departure_time": [None, None],
             "actual_arrival_time": [None, None],
         }

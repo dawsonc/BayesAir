@@ -10,7 +10,7 @@ class TestAirport(unittest.TestCase):
         # Create an instance of the Airport class for testing
         self.airport = Airport(
             code="ABC",
-            num_available_aircraft=3,
+            available_aircraft=[Time(0.0), Time(0.0), Time(0.0)],
             mean_service_time=Time(10.0),
             runway_use_time_std_dev=Time(2.0),
             mean_turnaround_time=Time(30.0),
