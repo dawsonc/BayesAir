@@ -10,7 +10,7 @@ def load_all_data():
     script_directory = os.path.dirname(os.path.abspath(__file__))
 
     # Construct the relative path to the CSV file
-    file_path = os.path.join(script_directory, "../..", "data", "wn_dec18_jan1.csv")
+    file_path = os.path.join(script_directory, "../..", "data", "wn_dec21_dec30.csv")
 
     # Read the CSV file into a DataFrame
     df = pd.read_csv(file_path)
@@ -34,8 +34,8 @@ def split_nominal_disrupted_data(df: pd.DataFrame):
     df["Date"] = pd.to_datetime(df["Date"])
 
     # Filter rows based on the date condition
-    disrupted_start = pd.to_datetime("2022-12-21")
-    disrupted_end = pd.to_datetime("2023-01-01")
+    disrupted_start = pd.to_datetime("12/21/2022")
+    disrupted_end = pd.to_datetime("12/30/2022")
 
     # Filter rows based on the date condition
     nominal_data = df[(df["Date"] < disrupted_start) | (df["Date"] > disrupted_end)]
@@ -96,7 +96,7 @@ def remap_columns(df):
     column_mapping = {
         "Flight Number": "flight_number",
         "Origin Airport Code": "origin_airport",
-        "Destination Airport Code": "destination_airport",
+        "Dest Airport Code": "destination_airport",
         "Scheduled Departure Time": "scheduled_departure_time",
         "Scheduled Arrival Time": "scheduled_arrival_time",
         "Actual Departure Time": "actual_departure_time",
@@ -125,6 +125,30 @@ def remap_columns(df):
 
     return remapped_df
 
+def top_N_df(df, number_of_airports):
+    number_of_airports = number_of_airports
+
+    #Using df.mode() to determine most common elements in a column.
+    mode = df.mode()
+
+    #Creating a list of "top airports" by destination_airport. 
+    most_visited_airports = []
+    for i in range(number_of_airports):
+        most_visited_airports.append(mode["desintation_airport"][i])
+
+    #Only choose flights that have flights between two airports in that list
+    for i in range(len(df.index)):
+
+        #Only appending the flight if its airport is in the most_visited_airports_list
+        A1 = df["origin_airport"][i]
+        A2 = df["destination_airport"][i]
+        if(A1 not in most_visited_airports or A2 not in most_visited_airports):
+            df = df.drop([i])
+    
+    #Resetting the indices of the datagrame
+    df_reset = df.reset_index(drop=True)
+
+    return df_reset
 
 if __name__ == "__main__":
     df = load_all_data()
