@@ -10,10 +10,19 @@ def load_all_data():
     script_directory = os.path.dirname(os.path.abspath(__file__))
 
     # Construct the relative path to the CSV file
-    file_path = os.path.join(script_directory, "../..", "data", "wn_dec21_dec30.csv")
+    nominal_file_path = os.path.join(
+        script_directory, "../..", "data", "wn_dec01_dec20.csv"
+    )
+    disrupted_file_path = os.path.join(
+        script_directory, "../..", "data", "wn_dec21_dec30.csv"
+    )
 
-    # Read the CSV file into a DataFrame
-    df = pd.read_csv(file_path)
+    # Read the CSV files into a DataFrame
+    nominal_df = pd.read_csv(nominal_file_path)
+    disrupted_df = pd.read_csv(disrupted_file_path)
+
+    # Concatenate the two DataFrames
+    df = pd.concat([nominal_df, disrupted_df])
 
     return df
 
@@ -74,6 +83,9 @@ def convert_to_float_hours_optimized(time_series):
     # Replace "--:--" with "23:59" (delay cancelled flights to end of day)
     time_series.replace("--:--", "23:59", inplace=True)
 
+    # Replace "24:00" with "23:59" (midnight)
+    time_series.replace("24:00", "23:59", inplace=True)
+
     # Convert time strings to datetime objects
     time_objects = pd.to_datetime(time_series, format="%H:%M")
 
@@ -125,34 +137,39 @@ def remap_columns(df):
 
     return remapped_df
 
-def top_N_df(df, number_of_airports):
-    number_of_airports = number_of_airports
 
-    #Using df.mode() to determine most common elements in a column.
-    mode = df.mode()
+def top_N_df(df, number_of_airports: int):
+    """
+    Get the top N airports by arrivals and filter the dataframe to include only
+    flights between those airports.
 
-    #Creating a list of "top airports" by destination_airport. 
-    most_visited_airports = []
-    for i in range(number_of_airports):
-        most_visited_airports.append(mode["desintation_airport"][i])
+    Args:
+        df: the original dataframe
+        number_of_airports: the number of airports to include
+    """
+    # Get the top-N airports by arrivals
+    top_N_airports = (
+        df["destination_airport"].value_counts().head(number_of_airports).index
+    )
 
-    #Only choose flights that have flights between two airports in that list
-    for i in range(len(df.index)):
+    # Filter the original DataFrame based on the desired airports
+    filtered_df = df[
+        df["origin_airport"].isin(top_N_airports)
+        & df["destination_airport"].isin(top_N_airports)
+    ]
 
-        #Only appending the flight if its airport is in the most_visited_airports_list
-        A1 = df["origin_airport"][i]
-        A2 = df["destination_airport"][i]
-        if(A1 not in most_visited_airports or A2 not in most_visited_airports):
-            df = df.drop([i])
-    
-    #Resetting the indices of the datagrame
-    df_reset = df.reset_index(drop=True)
+    return filtered_df
 
-    return df_reset
 
 if __name__ == "__main__":
+    # Load data and split by date
     df = load_all_data()
     nominal_df, disrupted_df = split_nominal_disrupted_data(df)
     nominal_dfs, disrupted_dfs = split_by_date(nominal_df), split_by_date(disrupted_df)
+
+    # Remap columns and filter only to top N airports
+    top_N = 6
     nominal_dfs = [remap_columns(df) for df in nominal_dfs]
     disrupted_dfs = [remap_columns(df) for df in disrupted_dfs]
+    nominal_dfs = [top_N_df(df, top_N) for df in nominal_dfs]
+    disrupted_dfs = [top_N_df(df, top_N) for df in disrupted_dfs]
