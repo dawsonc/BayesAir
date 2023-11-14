@@ -10,10 +10,19 @@ def load_all_data():
     script_directory = os.path.dirname(os.path.abspath(__file__))
 
     # Construct the relative path to the CSV file
-    file_path = os.path.join(script_directory, "../..", "data", "wn_dec18_jan1.csv")
+    nominal_file_path = os.path.join(
+        script_directory, "../..", "data", "wn_dec01_dec20.csv"
+    )
+    disrupted_file_path = os.path.join(
+        script_directory, "../..", "data", "wn_dec21_dec30.csv"
+    )
 
-    # Read the CSV file into a DataFrame
-    df = pd.read_csv(file_path)
+    # Read the CSV files into a DataFrame
+    nominal_df = pd.read_csv(nominal_file_path)
+    disrupted_df = pd.read_csv(disrupted_file_path)
+
+    # Concatenate the two DataFrames
+    df = pd.concat([nominal_df, disrupted_df])
 
     return df
 
@@ -30,16 +39,13 @@ def split_nominal_disrupted_data(df: pd.DataFrame):
         A dataframe filtered to include only flights outside the disrupted period
         A dataframe filtered to include flights within the disrupted period
     """
-    # Convert to date type
-    df["Date"] = pd.to_datetime(df["Date"])
+    # Filter rows based on the date condition
+    disrupted_start = pd.to_datetime("12/21/2022")
+    disrupted_end = pd.to_datetime("12/30/2022")
 
     # Filter rows based on the date condition
-    disrupted_start = pd.to_datetime("2022-12-21")
-    disrupted_end = pd.to_datetime("2023-01-01")
-
-    # Filter rows based on the date condition
-    nominal_data = df[(df["Date"] < disrupted_start) | (df["Date"] > disrupted_end)]
-    disrupted_data = df[(df["Date"] >= disrupted_start) & (df["Date"] <= disrupted_end)]
+    nominal_data = df[(df["date"] < disrupted_start) | (df["date"] > disrupted_end)]
+    disrupted_data = df[(df["date"] >= disrupted_start) & (df["date"] <= disrupted_end)]
 
     return nominal_data, disrupted_data
 
@@ -48,13 +54,13 @@ def split_by_date(df: pd.DataFrame):
     """Split a DataFrame of flights into a list of DataFrames, one for each date.
 
     Args:
-        df: the dataframe of flight data with a 'Date' column
+        df: the dataframe of flight data with a "date" column
 
     Returns:
         A list of DataFrames, each containing data for a specific date
     """
-    # Group the DataFrame by the 'Date' column
-    grouped_df = df.groupby("Date")
+    # Group the DataFrame by the "date" column
+    grouped_df = df.groupby("date")
 
     # Create a list of DataFrames, one for each date
     date_dataframes = [group for _, group in grouped_df]
@@ -73,6 +79,9 @@ def convert_to_float_hours_optimized(time_series):
     """
     # Replace "--:--" with "23:59" (delay cancelled flights to end of day)
     time_series.replace("--:--", "23:59", inplace=True)
+
+    # Replace "24:00" with "23:59" (midnight)
+    time_series.replace("24:00", "23:59", inplace=True)
 
     # Convert time strings to datetime objects
     time_objects = pd.to_datetime(time_series, format="%H:%M")
@@ -95,8 +104,9 @@ def remap_columns(df):
     # Define the mapping
     column_mapping = {
         "Flight Number": "flight_number",
+        "Date": "date",
         "Origin Airport Code": "origin_airport",
-        "Destination Airport Code": "destination_airport",
+        "Dest Airport Code": "destination_airport",
         "Scheduled Departure Time": "scheduled_departure_time",
         "Scheduled Arrival Time": "scheduled_arrival_time",
         "Actual Departure Time": "actual_departure_time",
@@ -123,12 +133,53 @@ def remap_columns(df):
         remapped_df["actual_arrival_time"]
     )
 
+    # Convert date to datetime type
+    remapped_df["date"] = pd.to_datetime(remapped_df["date"])
+
     return remapped_df
 
 
+def top_N_df(df, number_of_airports: int):
+    """
+    Get the top N airports by arrivals and filter the dataframe to include only
+    flights between those airports.
+
+    Args:
+        df: the original dataframe
+        number_of_airports: the number of airports to include
+    """
+    # Get the top-N airports by arrivals
+    top_N_airports = (
+        df["destination_airport"].value_counts().head(number_of_airports).index
+    )
+
+    # Filter the original DataFrame based on the desired airports
+    filtered_df = df[
+        df["origin_airport"].isin(top_N_airports)
+        & df["destination_airport"].isin(top_N_airports)
+    ]
+
+    return filtered_df
+
+
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    # Load data, filter, and split by date
     df = load_all_data()
-    nominal_df, disrupted_df = split_nominal_disrupted_data(df)
+    df = remap_columns(df)
+    filtered_df = top_N_df(df, 6)
+    nominal_df, disrupted_df = split_nominal_disrupted_data(filtered_df)
     nominal_dfs, disrupted_dfs = split_by_date(nominal_df), split_by_date(disrupted_df)
-    nominal_dfs = [remap_columns(df) for df in nominal_dfs]
-    disrupted_dfs = [remap_columns(df) for df in disrupted_dfs]
+
+    # Plot a histogram of the total number of flights between top-N airports
+    N_range = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+    num_flights = []
+    for top_N in N_range:
+        filtered_df = top_N_df(df, top_N)
+        num_flights.append(len(filtered_df))
+
+    plt.plot(N_range, num_flights, "o-")
+    plt.xlabel("Number of airports kept in dataset")
+    plt.ylabel("Total number of flights")
+    plt.show()
