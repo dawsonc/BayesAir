@@ -48,7 +48,6 @@ def train_nominal():
 
     # Create an autoguide for the model
     model = air_traffic_network_model
-    guide = pyro.infer.autoguide.AutoMultivariateNormal(model)
 
     # Render the first few hours of the model to see what the structure is
     model_graph = pyro.render_model(
@@ -58,31 +57,6 @@ def train_nominal():
         render_distributions=False,
     )
     model_graph.render(f"tmp/wn_network_top_{top_N}_{hrs:.0f}hr", cleanup=True)
-
-    # # Render the guide too
-    # guide_graph = pyro.render_model(
-    #     guide,
-    #     model_args=(states, hrs, dt),
-    #     render_params=False,
-    #     render_distributions=False,
-    # )
-    # guide_graph.render(f"tmp/wn_network_top_{top_N}_{hrs:.0f}hr_guide", cleanup=True)
-
-    # # setup the optimizer
-    # adam_params = {"lr": 0.0001}
-    # optimizer = pyro.optim.Adam(adam_params)
-
-    # # setup the inference algorithm
-    # svi = pyro.infer.SVI(model, guide, optimizer, loss=pyro.infer.Trace_ELBO())
-
-    # # do gradient steps
-    # n_steps = 1000
-    # losses = []
-    # pbar = tqdm(range(n_steps))
-    # for _ in pbar:
-    #     loss = svi.step(states, hrs, dt)  # Only do the first day to start
-    #     losses.append(loss)
-    #     pbar.set_description(f"ELBO Loss: {loss:.2f}")
 
     # Set up MCMC inference
     nuts_kernel = pyro.infer.NUTS(model)
