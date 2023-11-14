@@ -19,15 +19,13 @@ def parse_flight(schedule_row: tuple) -> Flight:
             - actual_departure_time
             - actual_arrival_time
     """
-    (
-        flight_number,
-        origin_airport,
-        destination_airport,
-        scheduled_departure_time,
-        scheduled_arrival_time,
-        actual_departure_time,
-        actual_arrival_time,
-    ) = schedule_row
+    flight_number = schedule_row["flight_number"]
+    origin_airport = schedule_row["origin_airport"]
+    destination_airport = schedule_row["destination_airport"]
+    scheduled_departure_time = schedule_row["scheduled_departure_time"]
+    scheduled_arrival_time = schedule_row["scheduled_arrival_time"]
+    actual_departure_time = schedule_row["actual_departure_time"]
+    actual_arrival_time = schedule_row["actual_arrival_time"]
 
     return Flight(
         flight_number=flight_number,
@@ -62,7 +60,7 @@ def parse_schedule(schedule_df: pd.DataFrame) -> tuple[list[Flight], list[Flight
         a list of airports
     """
     # Get a list of flights
-    flights = [parse_flight(row) for row in schedule_df.itertuples(index=False)]
+    flights = [parse_flight(row) for _, row in schedule_df.iterrows()]
 
     # Get a list of unique airport codes from the origin and destination columns
     airport_codes = pd.concat(
