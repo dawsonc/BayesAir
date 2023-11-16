@@ -15,6 +15,8 @@ class Flight:
         destination: The destination airport code.
         scheduled_departure_time: The scheduled departure time.
         scheduled_arrival_time: The scheduled arrival time.
+        simulated_departure_time: The simulated departure time.
+        simulated_arrival_time: The simulated arrival time.
         actual_departure_time: The actual departure time.
         actual_arrival_time: The actual arrival time.
     """
@@ -24,6 +26,8 @@ class Flight:
     destination: AirportCode
     scheduled_departure_time: Time
     scheduled_arrival_time: Time
+    simulated_departure_time: Optional[Time] = None
+    simulated_arrival_time: Optional[Time] = None
     actual_departure_time: Optional[Time] = None
     actual_arrival_time: Optional[Time] = None
 

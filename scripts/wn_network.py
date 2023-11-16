@@ -17,9 +17,9 @@ def train_nominal():
     starting_aircraft = 50
 
     # Hyperparameters
-    hrs = 10.0
-    dt = 0.1
-    top_N = 4
+    hrs = 25.0  # extend a bit past 1 day to let all flights finish
+    dt = 0.25
+    top_N = 2
 
     num_samples = 100
     warmup_steps = 100
@@ -59,7 +59,7 @@ def train_nominal():
     model_graph.render(f"tmp/wn_network_top_{top_N}_{hrs:.0f}hr", cleanup=True)
 
     # Set up MCMC inference
-    nuts_kernel = pyro.infer.NUTS(model)
+    nuts_kernel = pyro.infer.NUTS(model, ignore_jit_warnings=True)
     mcmc = pyro.infer.MCMC(
         nuts_kernel,
         num_samples=num_samples,

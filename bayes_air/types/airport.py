@@ -47,6 +47,7 @@ class Airport:
             turnaround).
         available_crew: a list of times at which crew become available (after
             turnaround). Treats crew for 1 aircraft as a single unit.
+        last_departure_time: The time at which the last aircraft departed.
     """
 
     code: AirportCode
@@ -58,6 +59,7 @@ class Airport:
     turnaround_queue: list[Time] = field(default_factory=list)
     available_aircraft: list[Time] = field(default_factory=list)
     available_crew: list[Time] = field(default_factory=list)
+    last_departure_time: Time = field(default_factory=lambda: Time(0.0))
 
     @property
     def num_available_aircraft(self) -> int:
@@ -151,13 +153,21 @@ class Airport:
             var_name,
             dist.Exponential(1.0 / self.mean_service_time.reshape(-1)),
         )
-        queue_entry.assigned_service_time = time + service_time
 
         # Update the waiting times for all aircraft
         for other_queue_entry in self.runway_queue:
             other_queue_entry.total_wait_time = (
                 other_queue_entry.total_wait_time + service_time
             )
+
+        # Update the time at which this aircraft leaves the queue
+        queue_entry.assigned_service_time = (
+            queue_entry.queue_start_time + queue_entry.total_wait_time
+        )
+
+        # print(
+        #     f"\t{queue_entry.flight} assigned service time {queue_entry.assigned_service_time} (entered queue {queue_entry.queue_start_time} and sampled service time {service_time})"
+        # )
 
     def _assign_departure_time(
         self,
@@ -166,40 +176,42 @@ class Airport:
     ) -> None:
         """Sample a random departure time for a flight that is using the runway.
 
-        If an actual departure time has been observed, then condition on that.
-
         Args:
             queue_entry: The queue entry for the flight to assign a departure time to.
             var_prefix: prefix for sampled variable names.
         """
-        queue_entry.flight.actual_departure_time = pyro.sample(
-            var_prefix + str(queue_entry.flight) + "_actual_departure_time",
+        queue_entry.flight.simulated_departure_time = pyro.sample(
+            var_prefix + str(queue_entry.flight) + "_simulated_departure_time",
             dist.Normal(
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
             ),
-            obs=queue_entry.flight.actual_departure_time,
         )
+
+        # print(
+        #     f"\t{queue_entry.flight} departing at {queue_entry.flight.simulated_departure_time} (entered queue {queue_entry.queue_start_time} and waited {queue_entry.total_wait_time})"
+        # )
 
     def _assign_arrival_time(
         self, queue_entry: QueueEntry, var_prefix: str = ""
     ) -> None:
         """Sample a random arrival time for a flight that is using the runway.
 
-        If an actual arrival time has been observed, then condition on that.
-
         Args:
             queue_entry: The queue entry for the flight to assign a arrival time to.
             var_prefix: prefix for sampled variable names.
         """
-        queue_entry.flight.actual_arrival_time = pyro.sample(
-            var_prefix + str(queue_entry.flight) + "_actual_arrival_time",
+        queue_entry.flight.simulated_arrival_time = pyro.sample(
+            var_prefix + str(queue_entry.flight) + "_simulated_arrival_time",
             dist.Normal(
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
             ),
-            obs=queue_entry.flight.actual_arrival_time,
         )
+
+        # print(
+        #     f"\t{queue_entry.flight} arriving at {queue_entry.flight.simulated_arrival_time} (entered queue {queue_entry.queue_start_time} and waited {queue_entry.total_wait_time})"
+        # )
 
     def _assign_turnaround_time(self, flight: Flight, var_prefix: str = "") -> None:
         """Sample a random turnaround time for an arrived aircraft.
@@ -212,4 +224,4 @@ class Airport:
             var_prefix + str(flight) + "_turnaround_time",
             dist.Normal(self.mean_turnaround_time, self.turnaround_time_std_dev),
         )
-        self.turnaround_queue.append(flight.actual_arrival_time + turnaround_time)
+        self.turnaround_queue.append(flight.simulated_arrival_time + turnaround_time)

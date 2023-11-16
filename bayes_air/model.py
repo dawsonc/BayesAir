@@ -1,4 +1,5 @@
 """Define a probabilistic model for an air traffic network."""
+from copy import deepcopy
 
 import pyro
 import pyro.distributions as dist
@@ -8,7 +9,7 @@ from bayes_air.types import QueueEntry
 
 
 def air_traffic_network_model(
-    states: NetworkState, T: float = 24.0, delta_t: float = 0.1
+    states: list[NetworkState], T: float = 24.0, delta_t: float = 0.1
 ):
     """
     Simulate the behavior of an air traffic network.
@@ -20,10 +21,13 @@ def air_traffic_network_model(
         T: the duration of the simulation, in hours
         delta_t: the time resolution of the simulation, in hours
     """
+    # Copy state to avoid modifying it
+    states = deepcopy(states)
     # Define parameters used by the simulation
     runway_use_time_std_dev = 1.0 / 60  # 1 minute
     travel_time_variation = 0.05  # 5% variation in travel time
     turnaround_time_variation = 0.05  # 5% variation in turnaround time
+    measurement_variation = 0.1  # small standard deviation in measurement error
 
     # Sample latent variables for airports
     airport_codes = states[0].airports.keys()
@@ -37,7 +41,7 @@ def air_traffic_network_model(
     }
     travel_times = {
         (origin, destination): pyro.sample(
-            f"travel_time_{origin}_{destination}", dist.Uniform(0.5, 5.0)
+            f"travel_time_{origin}_{destination}", dist.Uniform(0.1, 5.0)
         )
         for origin in airport_codes
         for destination in airport_codes
@@ -46,9 +50,16 @@ def air_traffic_network_model(
 
     # Simulate for each state
     output_states = []
-    for day_ind in pyro.markov(range(len(states))):
+    for day_ind in pyro.plate("days", len(states)):
         state = states[day_ind]
         var_prefix = f"day{day_ind}_"
+
+        # print(f"============= Starting day {day_ind} =============")
+        # print(f"# pending flights: {len(state.pending_flights)}")
+        # print(f"# in-transit flights: {len(state.in_transit_flights)}")
+        # print(f"# completed flights: {len(state.completed_flights)}")
+        # print("Travel times:")
+        # print(travel_times)
 
         # Assign the latent variables to the airports
         for airport in state.airports.values():
@@ -92,6 +103,32 @@ def air_traffic_network_model(
             # All flights that are in transit get moved to the runway queue at their
             # destination airport, if enough time has elapsed
             state.update_in_transit_flights(t)
+
+        # print(f"---------- Completing day {day_ind} ----------")
+        # print(f"# pending flights: {len(state.pending_flights)}")
+        # print(f"# in-transit flights: {len(state.in_transit_flights)}")
+        # print(f"# completed flights: {len(state.completed_flights)}")
+
+        # TODO debug
+
+        # Link simulated and actual arrival/departure times for all flights
+        # by sampling with an observation of the actual time
+        for flight in state.completed_flights:
+            flight.actual_departure_time = pyro.sample(
+                var_prefix + str(flight) + "_actual_departure_time",
+                dist.Normal(flight.simulated_departure_time, measurement_variation),
+                obs=flight.actual_departure_time,
+            )
+            flight.actual_arrival_time = pyro.sample(
+                var_prefix + str(flight) + "_actual_arrival_time",
+                dist.Normal(flight.simulated_arrival_time, measurement_variation),
+                # dist.Normal(  # TODO remove this
+                #     flight.simulated_departure_time
+                #     + travel_times[flight.origin, flight.destination],
+                #     measurement_variation,
+                # ),
+                obs=flight.actual_arrival_time,
+            )
 
         # Once we're done, return the state (this will include the actual arrival/departure
         # times for each aircraft)

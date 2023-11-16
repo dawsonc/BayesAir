@@ -6,8 +6,7 @@ import pyro
 import pyro.distributions as dist
 import torch
 
-from bayes_air.types import QueueEntry
-from bayes_air.types import Airport, AirportCode, Flight, Time
+from bayes_air.types import Airport, AirportCode, Flight, QueueEntry, Time
 
 
 @dataclass
@@ -113,7 +112,7 @@ class NetworkState:
 
             # Add the flight to the in-transit flights list
             self.in_transit_flights.append(
-                (flight, flight.actual_departure_time + travel_time)
+                (flight, flight.simulated_departure_time + travel_time)
             )
 
     def add_completed_flights(self, landing_flights: list[Flight]) -> None:
@@ -138,8 +137,10 @@ class NetworkState:
                 # Add the completed flights to the arrival queue
                 queue_entry = QueueEntry(flight=flight, queue_start_time=arrival_time)
                 self.airports[flight.destination].runway_queue.append(queue_entry)
+                # print(f"\t{flight} landing at {arrival_time}")
             else:
                 new_in_transit_flights.append((flight, arrival_time))
+                # print(f"\t{flight} still in transit; will land {arrival_time}")
 
         # Update the in-transit flights list
         self.in_transit_flights = new_in_transit_flights
