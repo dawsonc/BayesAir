@@ -72,7 +72,7 @@ def main():
         model,
         max_tree_depth=5,
         jit_compile=False,
-        step_size=1e-3,
+        step_size=3e-2,
         adapt_step_size=False,
     )
     mcmc = pyro.infer.MCMC(

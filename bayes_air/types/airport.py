@@ -180,12 +180,16 @@ class Airport:
             queue_entry: The queue entry for the flight to assign a departure time to.
             var_prefix: prefix for sampled variable names.
         """
-        queue_entry.flight.simulated_departure_time = pyro.sample(
-            var_prefix + str(queue_entry.flight) + "_simulated_departure_time",
-            dist.Normal(
-                queue_entry.queue_start_time + queue_entry.total_wait_time,
-                self.runway_use_time_std_dev,
-            ),
+        # TODO should this be sampling or deterministic
+        # queue_entry.flight.simulated_departure_time = pyro.sample(
+        #     var_prefix + str(queue_entry.flight) + "_simulated_departure_time",
+        #     dist.Normal(
+        #         queue_entry.queue_start_time + queue_entry.total_wait_time,
+        #         self.runway_use_time_std_dev,
+        #     ),
+        # )
+        queue_entry.flight.simulated_departure_time = (
+            queue_entry.queue_start_time + queue_entry.total_wait_time
         )
 
         # print(
@@ -201,12 +205,16 @@ class Airport:
             queue_entry: The queue entry for the flight to assign a arrival time to.
             var_prefix: prefix for sampled variable names.
         """
-        queue_entry.flight.simulated_arrival_time = pyro.sample(
-            var_prefix + str(queue_entry.flight) + "_simulated_arrival_time",
-            dist.Normal(
-                queue_entry.queue_start_time + queue_entry.total_wait_time,
-                self.runway_use_time_std_dev,
-            ),
+        # TODO should this be sampling or deterministic?
+        # queue_entry.flight.simulated_arrival_time = pyro.sample(
+        #     var_prefix + str(queue_entry.flight) + "_simulated_arrival_time",
+        #     dist.Normal(
+        #         queue_entry.queue_start_time + queue_entry.total_wait_time,
+        #         self.runway_use_time_std_dev,
+        #     ),
+        # )
+        queue_entry.flight.simulated_arrival_time = (
+            queue_entry.queue_start_time + queue_entry.total_wait_time
         )
 
         # print(

@@ -122,11 +122,6 @@ def air_traffic_network_model(
             flight.actual_arrival_time = pyro.sample(
                 var_prefix + str(flight) + "_actual_arrival_time",
                 dist.Normal(flight.simulated_arrival_time, measurement_variation),
-                # dist.Normal(  # TODO remove this
-                #     flight.simulated_departure_time
-                #     + travel_times[flight.origin, flight.destination],
-                #     measurement_variation,
-                # ),
                 obs=flight.actual_arrival_time,
             )
 
