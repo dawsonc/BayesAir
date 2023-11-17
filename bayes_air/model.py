@@ -27,10 +27,11 @@ def air_traffic_network_model(
     runway_use_time_std_dev = 1.0 / 60  # 1 minute
     travel_time_variation = 0.05  # 5% variation in travel time
     turnaround_time_variation = 0.05  # 5% variation in turnaround time
-    measurement_variation = 0.1  # small standard deviation in measurement error
+    measurement_variation = 0.2  # small standard deviation in measurement error
 
     # Sample latent variables for airports
     airport_codes = states[0].airports.keys()
+    # TODO sample or params?
     airport_turnaround_times = {
         code: pyro.sample(f"{code}_mean_turnaround_time", dist.Uniform(0.0, 1.0))
         for code in airport_codes
@@ -47,10 +48,37 @@ def air_traffic_network_model(
         for destination in airport_codes
         if origin != destination
     }
+    # airport_turnaround_times = {
+    #     code: pyro.param(
+    #         f"{code}_mean_turnaround_time",
+    #         lambda: torch.tensor(0.5),
+    #         constraint=constraints.positive,
+    #     )
+    #     for code in airport_codes
+    # }
+    # airport_service_times = {
+    #     code: pyro.param(
+    #         f"{code}_mean_service_time",
+    #         lambda: torch.tensor(0.02),
+    #         constraint=constraints.positive,
+    #     )
+    #     for code in airport_codes
+    # }
+    # travel_times = {
+    #     (origin, destination): pyro.param(
+    #         f"travel_time_{origin}_{destination}",
+    #         lambda: torch.tensor(2.0),
+    #         constraint=constraints.positive,
+    #     )
+    #     for origin in airport_codes
+    #     for destination in airport_codes
+    #     if origin != destination
+    # }
 
     # Simulate for each state
     output_states = []
-    for day_ind in pyro.plate("days", len(states)):
+    # for day_ind in pyro.plate("days", len(states)):
+    for day_ind in range(len(states)):
         state = states[day_ind]
         var_prefix = f"day{day_ind}_"
 
@@ -108,8 +136,6 @@ def air_traffic_network_model(
         # print(f"# pending flights: {len(state.pending_flights)}")
         # print(f"# in-transit flights: {len(state.in_transit_flights)}")
         # print(f"# completed flights: {len(state.completed_flights)}")
-
-        # TODO debug
 
         # Link simulated and actual arrival/departure times for all flights
         # by sampling with an observation of the actual time
