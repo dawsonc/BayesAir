@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bayes-air"
-version = "0.0.1"
+version = "0.0.2"
 description = "A framework for Bayesian modeling and analysis of air transportation network dynamics"
 authors = ["Charles Dawson <charles.dwsn@gmail.com>"]
 license = "BSD 3-Clause"
@@ -8,19 +8,20 @@ readme = "README.md"
 packages = [{include = "bayes_air"}]
 
 [tool.poetry.dependencies]
-python = "<3.13,>=3.9"
+python = "<3.12,>=3.9"
 pyro-ppl = "^1.8.6"
 pandas = "^2.1.0"
 numpy = "^1.26.0"
 matplotlib = "^3.8.0"
 seaborn = "^0.13.0"
-torch = {version = "^2.1.0+cpu", source = "pytorch"}
+torch = [{version = "^2.1.0+cpu", source = "pytorch", platform = "linux"}, {version = "^2.1.0", source = "PyPI", platform = "darwin"}]
 graphviz = "^0.20.1"
 openpyxl = "^3.1.2"
 tqdm = "^4.66.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.1.1"
+
 ipykernel = "^6.25.2"
 pytest = "^7.4.3"
 
