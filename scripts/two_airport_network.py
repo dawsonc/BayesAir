@@ -1,6 +1,7 @@
 """Run the simulation for a simple two-airport network."""
 from copy import deepcopy
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import pandas as pd
 import pyro
@@ -94,15 +95,25 @@ def main():
     svi = pyro.infer.SVI(model, auto_guide, adam, elbo)
 
     losses = []
-    pbar = tqdm.tqdm(range(500))
+    pbar = tqdm.tqdm(range(1000))
     for step in pbar:
         loss = svi.step(states, hrs, dt)
         losses.append(loss)
         pbar.set_description(f"ELBO loss: {loss:.2f}")
 
     # Sample nominal travel time estimates from the posterior
-    with pyro.plate("samples", 800, dim=-1):
+    n_samples = 800
+    with pyro.plate("samples", n_samples, dim=-1):
         posterior_samples = auto_guide(states, hrs, dt)
+
+    # Because this is a simple problem, we know the exact distribution of travel times,
+    # so we can compare the posterior to the true distribution
+    true_travel_times_A1_A2 = (
+        1 + torch.rand((n_samples,)) * 0.3 - torch.rand((n_samples,)) * 0.3
+    )
+    true_travel_times_A2_A1 = (
+        1.5 + torch.rand((n_samples,)) * 0.3 - torch.rand((n_samples,)) * 0.3
+    )
 
     # Plot training curve and travel time posterior
     fig, axs = plt.subplots(1, 2, figsize=(10, 4))
@@ -112,14 +123,26 @@ def main():
     axs[0].set_ylabel("ELBO loss")
 
     sns.kdeplot(
+        x=true_travel_times_A1_A2.detach().cpu().numpy(),
+        y=true_travel_times_A2_A1.detach().cpu().numpy(),
+        ax=axs[1],
+        cmap="Blues",
+    )
+    sns.kdeplot(
         x=posterior_samples["travel_time_A1_A2"].detach().cpu().numpy(),
         y=posterior_samples["travel_time_A2_A1"].detach().cpu().numpy(),
         ax=axs[1],
+        cmap="Reds",
     )
     axs[1].set_xlabel("Travel time A1 -> A2")
     axs[1].set_ylabel("Travel time A2 -> A1")
     axs[1].set_xlim(0, 5)
     axs[1].set_ylim(0, 5)
+    handles = [
+        mpatches.Patch(facecolor=plt.cm.Reds(100), label="SVI Estimated Posterior"),
+        mpatches.Patch(facecolor=plt.cm.Blues(100), label="Ground Truth"),
+    ]
+    plt.legend(handles=handles)
 
     plt.show()
 

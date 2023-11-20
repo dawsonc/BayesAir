@@ -31,7 +31,6 @@ def air_traffic_network_model(
 
     # Sample latent variables for airports
     airport_codes = states[0].airports.keys()
-    # TODO sample or params?
     airport_turnaround_times = {
         code: pyro.sample(f"{code}_mean_turnaround_time", dist.Uniform(0.0, 1.0))
         for code in airport_codes
@@ -48,32 +47,6 @@ def air_traffic_network_model(
         for destination in airport_codes
         if origin != destination
     }
-    # airport_turnaround_times = {
-    #     code: pyro.param(
-    #         f"{code}_mean_turnaround_time",
-    #         lambda: torch.tensor(0.5),
-    #         constraint=constraints.positive,
-    #     )
-    #     for code in airport_codes
-    # }
-    # airport_service_times = {
-    #     code: pyro.param(
-    #         f"{code}_mean_service_time",
-    #         lambda: torch.tensor(0.02),
-    #         constraint=constraints.positive,
-    #     )
-    #     for code in airport_codes
-    # }
-    # travel_times = {
-    #     (origin, destination): pyro.param(
-    #         f"travel_time_{origin}_{destination}",
-    #         lambda: torch.tensor(2.0),
-    #         constraint=constraints.positive,
-    #     )
-    #     for origin in airport_codes
-    #     for destination in airport_codes
-    #     if origin != destination
-    # }
 
     # Simulate for each state
     output_states = []
