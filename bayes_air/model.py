@@ -10,9 +10,7 @@ from bayes_air.types import QueueEntry
 FAR_FUTURE_TIME = 30.0
 
 
-def air_traffic_network_model(
-    states: list[NetworkState], T: float = 24.0, delta_t: float = 0.1
-):
+def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
     """
     Simulate the behavior of an air traffic network.
 
@@ -20,7 +18,6 @@ def air_traffic_network_model(
         states: the starting states of the simulation (will run an independent
             simulation from each start state). All states must include the same
             airports.
-        T: the duration of the simulation, in hours
         delta_t: the time resolution of the simulation, in hours
     """
     # Copy state to avoid modifying it
@@ -43,7 +40,7 @@ def air_traffic_network_model(
     }
     travel_times = {
         (origin, destination): pyro.sample(
-            f"travel_time_{origin}_{destination}", dist.Uniform(0.1, 5.0)
+            f"travel_time_{origin}_{destination}", dist.Uniform(0.1, 8.0)
         )
         for origin in airport_codes
         for destination in airport_codes
@@ -75,7 +72,7 @@ def air_traffic_network_model(
 
         # Simulate the movement of aircraft within the system for a fixed period of time
         t = 0.0
-        for _ in pyro.markov(range(int(T // delta_t))):
+        while not state.complete:
             # Update the current time
             t += delta_t
 
@@ -115,6 +112,12 @@ def air_traffic_network_model(
         # Link simulated and actual arrival/departure times for all flights
         # by sampling with an observation of the actual time
         for flight in state.completed_flights:
+            # print(
+            #     f"{flight} simulated departure time: {flight.simulated_departure_time}; observed departure time: {flight.actual_departure_time}"
+            # )
+            # print(
+            #     f"{flight} simulated arrival time: {flight.simulated_arrival_time}; observed arrival time: {flight.actual_arrival_time}"
+            # )
             flight.actual_departure_time = pyro.sample(
                 var_prefix + str(flight) + "_actual_departure_time",
                 dist.Normal(flight.simulated_departure_time, measurement_variation),
@@ -129,6 +132,7 @@ def air_traffic_network_model(
         # For any flights that are not yet completed, sample their actual arrival
         # and departure times around the maximum simulation time
         for flight in state.pending_flights:
+            print(f"WARN: {flight} did not complete, still pending")
             flight.actual_departure_time = pyro.sample(
                 var_prefix + str(flight) + "_actual_departure_time",
                 dist.Normal(FAR_FUTURE_TIME, measurement_variation),
@@ -141,6 +145,7 @@ def air_traffic_network_model(
             )
 
         for flight, _ in state.in_transit_flights:
+            print(f"WARN: {flight} did not complete, still in transit")
             flight.actual_departure_time = pyro.sample(
                 var_prefix + str(flight) + "_actual_departure_time",
                 dist.Normal(FAR_FUTURE_TIME, measurement_variation),
@@ -154,6 +159,7 @@ def air_traffic_network_model(
 
         for airport in state.airports.values():
             for queue_entry in airport.runway_queue:
+                print(f"WARN: {flight} did not complete, still in queue at {airport}")
                 flight = queue_entry.flight
                 flight.actual_departure_time = pyro.sample(
                     var_prefix + str(flight) + "_actual_departure_time",

@@ -31,6 +31,15 @@ class NetworkState:
         # Sort pending flights by scheduled departure time
         self.pending_flights.sort(key=lambda flight: flight.scheduled_departure_time)
 
+    @property
+    def complete(self):
+        """Return True if all flights have completed their journeys."""
+        return (
+            len(self.pending_flights) == 0
+            and len(self.in_transit_flights) == 0
+            and all([len(a.runway_queue) == 0 for a in self.airports.values()])
+        )
+
     def pop_ready_to_depart_flights(self, time: Time) -> list[Flight]:
         """Pop all flights from the pending flights list that are able to depart.
 

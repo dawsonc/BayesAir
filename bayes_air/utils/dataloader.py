@@ -75,6 +75,10 @@ def split_by_date(df: pd.DataFrame):
     # Create a list of DataFrames, one for each date
     date_dataframes = [group for _, group in grouped_df]
 
+    # Sort within each date by scheduled departure time
+    for date_df in date_dataframes:
+        date_df.sort_values(by="scheduled_departure_time", inplace=True)
+
     return date_dataframes
 
 
@@ -208,6 +212,38 @@ def remap_columns(df, airport_locations_df):
         remapped_df["destination_time_zone"],
     )
 
+    # If a flight is en-route at midnight, it's duration will be negative unless we add 24 hours
+    # to the actual and scheduled arrival times
+    scheduled_duration = (
+        remapped_df.scheduled_arrival_time - remapped_df.scheduled_departure_time
+    )
+    actual_duration = (
+        remapped_df.actual_arrival_time - remapped_df.actual_departure_time
+    )
+    remapped_df.loc[
+        actual_duration < 0, "actual_arrival_time"
+    ] += 24  # Add 24 hours to actual arrival time
+    remapped_df.loc[
+        scheduled_duration < 0, "scheduled_arrival_time"
+    ] += 24  # Add 24 hours to scheduled arrival time
+
+    # If a flight is delayed so that both the actual departure is the next day,
+    # we need to add 24 hours to the actual departure and arrival times
+    departure_delay = (
+        remapped_df.actual_departure_time - remapped_df.scheduled_departure_time
+    )
+    # Departure delay will be positive for flights that depart late within the same day,
+    # slightly negative for flights that depart early within the same day, and very
+    # negative for flights that depart late the next day
+    remapped_df.loc[
+        departure_delay < -3.0,
+        "actual_departure_time",
+    ] += 24  # Add 24 hours to actual departure time
+    remapped_df.loc[
+        departure_delay < -3.0,
+        "actual_arrival_time",
+    ] += 24  # Add 24 hours to actual arrival time
+
     # Convert date to datetime type
     remapped_df["date"] = pd.to_datetime(remapped_df["date"])
 
@@ -248,7 +284,8 @@ if __name__ == "__main__":
     nominal_dfs, disrupted_dfs = split_by_date(nominal_df), split_by_date(disrupted_df)
 
     # Save remapped data to file
-    df.to_csv("../../data/wn_dec01_dec30_remapped.csv", index=False)
+    script_directory = os.path.dirname(os.path.abspath(__file__))
+    df.to_pickle(os.path.join(script_directory, "../..", "data", "wn_data_clean.csv"))
 
     # Plot a histogram of the total number of flights between top-N airports
     N_range = [2, 3, 4, 5, 6, 7, 8, 9, 10]
