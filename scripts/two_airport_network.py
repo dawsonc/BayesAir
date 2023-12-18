@@ -95,7 +95,7 @@ def main():
     svi = pyro.infer.SVI(model, auto_guide, adam, elbo)
 
     losses = []
-    pbar = tqdm.tqdm(range(1000))
+    pbar = tqdm.tqdm(range(300))
     for step in pbar:
         loss = svi.step(states, hrs, dt)
         losses.append(loss)

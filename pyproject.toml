@@ -18,6 +18,8 @@ torch = [{version = "^2.1.0+cpu", source = "pytorch", platform = "linux"}, {vers
 graphviz = "^0.20.1"
 openpyxl = "^3.1.2"
 tqdm = "^4.66.1"
+timezonefinder = "^6.2.0"
+pytz = "^2023.3.post1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.1.1"

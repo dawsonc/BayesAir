@@ -7,6 +7,8 @@ import pyro.distributions as dist
 from bayes_air.network import NetworkState
 from bayes_air.types import QueueEntry
 
+FAR_FUTURE_TIME = 30.0
+
 
 def air_traffic_network_model(
     states: list[NetworkState], T: float = 24.0, delta_t: float = 0.1
@@ -123,6 +125,46 @@ def air_traffic_network_model(
                 dist.Normal(flight.simulated_arrival_time, measurement_variation),
                 obs=flight.actual_arrival_time,
             )
+
+        # For any flights that are not yet completed, sample their actual arrival
+        # and departure times around the maximum simulation time
+        for flight in state.pending_flights:
+            flight.actual_departure_time = pyro.sample(
+                var_prefix + str(flight) + "_actual_departure_time",
+                dist.Normal(FAR_FUTURE_TIME, measurement_variation),
+                obs=flight.actual_departure_time,
+            )
+            flight.actual_arrival_time = pyro.sample(
+                var_prefix + str(flight) + "_actual_arrival_time",
+                dist.Normal(FAR_FUTURE_TIME, measurement_variation),
+                obs=flight.actual_arrival_time,
+            )
+
+        for flight, _ in state.in_transit_flights:
+            flight.actual_departure_time = pyro.sample(
+                var_prefix + str(flight) + "_actual_departure_time",
+                dist.Normal(FAR_FUTURE_TIME, measurement_variation),
+                obs=flight.actual_departure_time,
+            )
+            flight.actual_arrival_time = pyro.sample(
+                var_prefix + str(flight) + "_actual_arrival_time",
+                dist.Normal(FAR_FUTURE_TIME, measurement_variation),
+                obs=flight.actual_arrival_time,
+            )
+
+        for airport in state.airports.values():
+            for queue_entry in airport.runway_queue:
+                flight = queue_entry.flight
+                flight.actual_departure_time = pyro.sample(
+                    var_prefix + str(flight) + "_actual_departure_time",
+                    dist.Normal(FAR_FUTURE_TIME, measurement_variation),
+                    obs=flight.actual_departure_time,
+                )
+                flight.actual_arrival_time = pyro.sample(
+                    var_prefix + str(flight) + "_actual_arrival_time",
+                    dist.Normal(FAR_FUTURE_TIME, measurement_variation),
+                    obs=flight.actual_arrival_time,
+                )
 
         # Once we're done, return the state (this will include the actual arrival/departure
         # times for each aircraft)
