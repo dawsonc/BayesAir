@@ -285,7 +285,7 @@ if __name__ == "__main__":
 
     # Save remapped data to file
     script_directory = os.path.dirname(os.path.abspath(__file__))
-    df.to_pickle(os.path.join(script_directory, "../..", "data", "wn_data_clean.csv"))
+    df.to_pickle(os.path.join(script_directory, "../..", "data", "wn_data_clean.pkl"))
 
     # Plot a histogram of the total number of flights between top-N airports
     N_range = [2, 3, 4, 5, 6, 7, 8, 9, 10]

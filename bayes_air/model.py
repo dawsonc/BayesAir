@@ -26,7 +26,7 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
     runway_use_time_std_dev = 1.0 / 60  # 1 minute
     travel_time_variation = 0.05  # 5% variation in travel time
     turnaround_time_variation = 0.05  # 5% variation in turnaround time
-    measurement_variation = 0.2  # small standard deviation in measurement error
+    measurement_variation = 0.2  # 12 min variation in measurement
 
     # Sample latent variables for airports
     airport_codes = states[0].airports.keys()
@@ -40,7 +40,7 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
     }
     travel_times = {
         (origin, destination): pyro.sample(
-            f"travel_time_{origin}_{destination}", dist.Uniform(0.1, 8.0)
+            f"travel_time_{origin}_{destination}", dist.Uniform(0.1, 6.0)
         )
         for origin in airport_codes
         for destination in airport_codes
