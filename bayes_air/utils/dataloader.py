@@ -92,8 +92,8 @@ def convert_to_float_hours_optimized(time_series, time_zone_series):
     Returns:
         Float hours since midnight, or None for canceled flights
     """
-    # Replace "--:--" with "23:59" (delay cancelled flights to end of day)
-    time_series.replace("--:--", "23:59", inplace=True)
+    # Replace "--:--" with "00:00" (mark them for later modification)
+    time_series.replace("--:--", "00:00", inplace=True)
 
     # Replace "24:00" with "23:59" (midnight)
     time_series.replace("24:00", "23:59", inplace=True)
@@ -109,6 +109,9 @@ def convert_to_float_hours_optimized(time_series, time_zone_series):
 
     # Extract hour and minute components
     hours_since_midnight = time_objects.dt.hour + time_objects.dt.minute / 60.0
+
+    # Replace times for cancelled flights with the maximum observed time + 1
+    hours_since_midnight[time_series == "00:00"] = hours_since_midnight.max() + 1.0
 
     return hours_since_midnight
 

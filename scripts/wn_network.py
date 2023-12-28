@@ -1,12 +1,14 @@
 """Run the simulation for a simple two-airport network."""
 from itertools import combinations
 
+import click
 import matplotlib.pyplot as plt
 import pandas as pd
 import pyro
 import seaborn as sns
 import torch
 import tqdm
+from torch.nn.functional import sigmoid
 
 import bayes_air.utils.dataloader as ba_dataloader
 import wandb
@@ -15,8 +17,8 @@ from bayes_air.network import NetworkState
 from bayes_air.schedule import parse_schedule
 
 
-def plotting_cb(
-    auto_guide, states, dt, n_samples, empirical_travel_times, show=False, wandb=True
+def plot_travel_times(
+    auto_guide, states, dt, n_samples, empirical_travel_times, wandb=True
 ):
     """Plot posterior samples of travel times."""
     # Sample nominal travel time estimates from the posterior
@@ -44,15 +46,13 @@ def plotting_cb(
         # Put all of the data into a DataFrame to plot it
         plotting_df = pd.DataFrame(
             {
-                f"{pair[0]}->{pair[1]}": posterior_samples[
-                    f"travel_time_{pair[0]}_{pair[1]}"
-                ]
+                f"{pair[0]}->{pair[1]}": 6.0
+                * sigmoid(posterior_samples[f"travel_time_{pair[0]}_{pair[1]}"])
                 .detach()
                 .cpu()
                 .numpy(),
-                f"{pair[1]}->{pair[0]}": posterior_samples[
-                    f"travel_time_{pair[1]}_{pair[0]}"
-                ]
+                f"{pair[1]}->{pair[0]}": 6.0
+                * sigmoid(posterior_samples[f"travel_time_{pair[1]}_{pair[0]}"])
                 .detach()
                 .cpu()
                 .numpy(),
@@ -112,7 +112,59 @@ def plotting_cb(
     return fig
 
 
-def train_nominal():
+def plot_service_times(auto_guide, states, dt, n_samples, wandb=True):
+    """Plot posterior samples of service times."""
+    # Sample mean service time estimates from the posterior
+    with pyro.plate("samples", n_samples, dim=-1):
+        posterior_samples = auto_guide(states, dt)
+
+    # Make subplots for each airport
+    airport_codes = states[0].airports.keys()
+    n_pairs = len(airport_codes)
+    max_rows = 3
+    max_plots_per_row = n_pairs // max_rows + 1
+    subplot_spec = []
+    for i in range(max_rows):
+        subplot_spec.append(
+            [f"{i * max_plots_per_row +j}" for j in range(max_plots_per_row)]
+        )
+
+    fig = plt.figure(layout="constrained", figsize=(12, 4 * max_rows))
+    axs = fig.subplot_mosaic(subplot_spec)
+
+    for i, code in enumerate(airport_codes):
+        # Put all of the data into a DataFrame to plot it
+        plotting_df = pd.DataFrame(
+            {
+                code: 0.25
+                * sigmoid(posterior_samples[f"{code}_mean_service_time"])
+                .detach()
+                .cpu()
+                .numpy(),
+                "type": "Posterior",
+            }
+        )
+
+        sns.histplot(
+            x=code,
+            hue="type",
+            ax=axs[f"{i}"],
+            data=plotting_df,
+            color="blue",
+            kde=True,
+        )
+        axs[f"{i}"].set_xlim(-0.01, 0.26)
+
+        if i == 0:
+            axs[f"{i}"].legend()
+        else:
+            axs[f"{i}"].legend([], [], frameon=False)
+
+    return fig
+
+
+def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
+    pyro.clear_param_store()  # avoid leaking parameters across runs
     pyro.enable_validation(True)
     pyro.set_rng_seed(1)
 
@@ -122,33 +174,10 @@ def train_nominal():
 
     # Hyperparameters
     dt = 0.2
-    top_N = 6
-    days = 1
-    svi_lr = 1e-2
-    svi_steps = 1000
-    n_samples = 800
-    plot_every = 50
-
-    # Initialize wandb
-    wandb.init(
-        project="bayes-air",
-        # group="WN",
-        name=f"top-{top_N}-nominal",
-        config={
-            "starting_crew": starting_crew,
-            "starting_aircraft": starting_aircraft,
-            "dt": dt,
-            "top_N": top_N,
-            "days": days,
-            "svi_lr": svi_lr,
-            "svi_steps": svi_steps,
-            "n_samples": n_samples,
-        },
-    )
 
     # Load the dataset
     df = pd.read_pickle("data/wn_data_clean.pkl")
-    df = ba_dataloader.top_N_df(df, top_N)
+    df = ba_dataloader.top_N_df(df, top_n)
     nominal_df, _ = ba_dataloader.split_nominal_disrupted_data(df)
     nominal_dfs = ba_dataloader.split_by_date(nominal_df)
 
@@ -167,7 +196,22 @@ def train_nominal():
     )
 
     # Convert each day into a schedule
-    states = []
+    states = []  # Initialize wandb
+    wandb.init(
+        project="bayes-air",
+        name=f"top-{top_n}-nominal-{days}-days",
+        config={
+            "type": "nominal",
+            "starting_crew": starting_crew,
+            "starting_aircraft": starting_aircraft,
+            "dt": dt,
+            "top_n": top_n,
+            "days": days,
+            "svi_lr": svi_lr,
+            "svi_steps": svi_steps,
+            "n_samples": n_samples,
+        },
+    )
     for day_df in nominal_dfs[:days]:
         flights, airports = parse_schedule(day_df)
 
@@ -184,14 +228,12 @@ def train_nominal():
         )
         states.append(state)
 
+    # Re-scale the ELBO by the number of days
     model = air_traffic_network_model
+    model = pyro.poutine.scale(model, scale=1.0 / days)
 
     # Create an autoguide for the model
-    # auto_guide = pyro.infer.autoguide.AutoMultivariateNormal(
-    #     model, init_loc_fn=pyro.infer.autoguide.init_to_mean, init_scale=0.5
-    # )
-    # auto_guide = pyro.infer.autoguide.AutoDelta(model)
-    auto_guide = pyro.infer.autoguide.AutoNormal(model)
+    auto_guide = pyro.infer.autoguide.AutoMultivariateNormal(model)
 
     # Set up SVI
     adam = pyro.optim.Adam({"lr": svi_lr})
@@ -205,13 +247,76 @@ def train_nominal():
         losses.append(loss)
         pbar.set_description(f"ELBO loss: {loss:.2f}")
 
-        if i % plot_every == 0:
-            fig = plotting_cb(auto_guide, states, dt, n_samples, travel_times)
+        if i % plot_every == 0 or i == svi_steps - 1:
+            fig = plot_travel_times(auto_guide, states, dt, n_samples, travel_times)
             wandb.log({"Travel times": fig}, commit=False)
+            plt.close(fig)
+
+            fig = plot_service_times(auto_guide, states, dt, n_samples, travel_times)
+            wandb.log({"Service times": wandb.Image(fig)}, commit=False)
             plt.close(fig)
 
         wandb.log({"ELBO": loss})
 
+    return loss
+
+
+def train_from_config(config):
+    return train(
+        config.top_n,
+        config.days,
+        config.svi_steps,
+        config.n_samples,
+        config.svi_lr,
+        config.plot_every,
+    )
+
+
+def train_sweep():
+    wandb.init(project="bayes-air")
+    train_from_config(wandb.config)
+
+
+@click.command()
+@click.option("--top-n", default=2, help="Number of airports to include in the network")
+@click.option("--days", default=18, help="Number of days to simulate")
+@click.option("--svi-steps", default=1000, help="Number of SVI steps to run")
+@click.option("--n-samples", default=800, help="Number of posterior samples to draw")
+@click.option("--svi-lr", default=1e-2, help="Learning rate for SVI")
+@click.option("--plot-every", default=100, help="Plot every N steps")
+def train_cmd(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
+    # Initialize wandb
+    wandb.init(
+        project="bayes-air",
+        name=f"top-{top_n}-nominal-{days}-days",
+        config={
+            "type": "nominal",
+            "top_n": top_n,
+            "days": days,
+            "svi_lr": svi_lr,
+            "svi_steps": svi_steps,
+            "n_samples": n_samples,
+        },
+    )
+
+    train(top_n, days, svi_steps, n_samples, svi_lr, plot_every)
+
 
 if __name__ == "__main__":
-    train_nominal()
+    # sweep_configuration = {
+    #     "method": "grid",
+    #     "metric": {"goal": "minimize", "name": "ELBO"},
+    #     "parameters": {
+    #         "top_n": {"values": [2]},
+    #         "days": {"values": [2, 5, 10, 18]},
+    #         "svi_steps": {"value": 10000},
+    #         "n_samples": {"value": 800},
+    #         "plot_every": {"value": 500},
+    #         "svi_lr": {"values": [1e-2, 1e-3, 1e-4]},
+    #     },
+    # }
+
+    # # Start the sweep
+    # sweep_id = wandb.sweep(sweep=sweep_configuration, project="bayes-air")
+    # wandb.agent(sweep_id, function=train_sweep, count=10)
+    train_sweep()

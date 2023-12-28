@@ -3,6 +3,7 @@ from copy import deepcopy
 
 import pyro
 import pyro.distributions as dist
+from torch.nn.functional import sigmoid
 
 from bayes_air.network import NetworkState
 from bayes_air.types import QueueEntry
@@ -23,24 +24,34 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
     # Copy state to avoid modifying it
     states = deepcopy(states)
     # Define parameters used by the simulation
-    runway_use_time_std_dev = 1.0 / 60  # 1 minute
+    # runway_use_time_std_dev = 1.0 / 60  # 1 minute
+    # runway_use_time_std_dev = 0.2  # TODO use this for direct obs
     travel_time_variation = 0.05  # 5% variation in travel time
     turnaround_time_variation = 0.05  # 5% variation in turnaround time
     measurement_variation = 0.2  # 12 min variation in measurement
 
-    # Sample latent variables for airports
+    # Sample system-level parameters
+    runway_use_time_std_dev = 0.05 * sigmoid(
+        pyro.sample("runway_use_time_std_dev", dist.Normal(0.0, 2.0))
+    )
+
+    # Sample latent variables for airports. We'll sample from distributions with
+    # unbounded support, then clamp them to the range we want using sigmoid.
     airport_codes = states[0].airports.keys()
     airport_turnaround_times = {
-        code: pyro.sample(f"{code}_mean_turnaround_time", dist.Uniform(0.0, 1.0))
+        code: 1.0
+        * sigmoid(pyro.sample(f"{code}_mean_turnaround_time", dist.Normal(0.0, 2.0)))
         for code in airport_codes
     }
     airport_service_times = {
-        code: pyro.sample(f"{code}_mean_service_time", dist.Uniform(0.0, 0.1))
+        code: 0.25
+        * sigmoid(pyro.sample(f"{code}_mean_service_time", dist.Normal(0.0, 2.0)))
         for code in airport_codes
     }
     travel_times = {
-        (origin, destination): pyro.sample(
-            f"travel_time_{origin}_{destination}", dist.Uniform(0.1, 6.0)
+        (origin, destination): 6.0
+        * sigmoid(
+            pyro.sample(f"travel_time_{origin}_{destination}", dist.Normal(0.0, 2.0))
         )
         for origin in airport_codes
         for destination in airport_codes
@@ -50,7 +61,7 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
     # Simulate for each state
     output_states = []
     # for day_ind in pyro.plate("days", len(states)):
-    for day_ind in range(len(states)):
+    for day_ind in pyro.markov(range(len(states)), history=1):
         state = states[day_ind]
         var_prefix = f"day{day_ind}_"
 
@@ -109,25 +120,25 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
         # print(f"# in-transit flights: {len(state.in_transit_flights)}")
         # print(f"# completed flights: {len(state.completed_flights)}")
 
-        # Link simulated and actual arrival/departure times for all flights
-        # by sampling with an observation of the actual time
-        for flight in state.completed_flights:
-            # print(
-            #     f"{flight} simulated departure time: {flight.simulated_departure_time}; observed departure time: {flight.actual_departure_time}"
-            # )
-            # print(
-            #     f"{flight} simulated arrival time: {flight.simulated_arrival_time}; observed arrival time: {flight.actual_arrival_time}"
-            # )
-            flight.actual_departure_time = pyro.sample(
-                var_prefix + str(flight) + "_actual_departure_time",
-                dist.Normal(flight.simulated_departure_time, measurement_variation),
-                obs=flight.actual_departure_time,
-            )
-            flight.actual_arrival_time = pyro.sample(
-                var_prefix + str(flight) + "_actual_arrival_time",
-                dist.Normal(flight.simulated_arrival_time, measurement_variation),
-                obs=flight.actual_arrival_time,
-            )
+        # # Link simulated and actual arrival/departure times for all flights
+        # # by sampling with an observation of the actual time
+        # for flight in state.completed_flights:
+        #     # print(
+        #     #     f"{flight} simulated departure time: {flight.simulated_departure_time}; observed departure time: {flight.actual_departure_time}"
+        #     # )
+        #     # print(
+        #     #     f"{flight} simulated arrival time: {flight.simulated_arrival_time}; observed arrival time: {flight.actual_arrival_time}"
+        #     # )
+        #     flight.actual_departure_time = pyro.sample(
+        #         var_prefix + str(flight) + "_actual_departure_time",
+        #         dist.Normal(flight.simulated_departure_time, measurement_variation),
+        #         obs=flight.actual_departure_time,
+        #     )
+        #     flight.actual_arrival_time = pyro.sample(
+        #         var_prefix + str(flight) + "_actual_arrival_time",
+        #         dist.Normal(flight.simulated_arrival_time, measurement_variation),
+        #         obs=flight.actual_arrival_time,
+        #     )
 
         # For any flights that are not yet completed, sample their actual arrival
         # and departure times around the maximum simulation time

@@ -187,6 +187,8 @@ class Airport:
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
             ),
+            # TODO should we observe here or at the end of the simulation?
+            obs=queue_entry.flight.actual_departure_time,
         )
         # queue_entry.flight.simulated_departure_time = (
         #     queue_entry.queue_start_time + queue_entry.total_wait_time
@@ -212,6 +214,8 @@ class Airport:
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
             ),
+            # TODO should we observe here or at the end of the simulation?
+            obs=queue_entry.flight.actual_arrival_time,
         )
         # queue_entry.flight.simulated_arrival_time = (
         #     queue_entry.queue_start_time + queue_entry.total_wait_time
