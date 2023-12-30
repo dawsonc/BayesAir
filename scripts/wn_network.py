@@ -209,8 +209,7 @@ def train(
     # Avoid plotting error
     matplotlib.use("Agg")
 
-    # Set the number of starting aircraft and crews at each airport
-    starting_crew = 50
+    # Set the number of starting aircraft at each airport
     starting_aircraft = 50
 
     # Hyperparameters
@@ -253,7 +252,6 @@ def train(
         group="nominal" if nominal else "disrupted",
         config={
             "type": "nominal",
-            "starting_crew": starting_crew,
             "starting_aircraft": starting_aircraft,
             "dt": dt,
             "top_n": top_n,
@@ -269,12 +267,10 @@ def train(
     for day_df in data[start_day : start_day + days]:
         flights, airports = parse_schedule(day_df)
 
-        # Add starting aircraft and crew to each airport
+        # Add starting aircraft to each airport
         for airport in airports:
             for _ in range(starting_aircraft):
                 airport.available_aircraft.append(torch.tensor(0.0))
-            for _ in range(starting_crew):
-                airport.available_crew.append(torch.tensor(0.0))
 
         state = NetworkState(
             airports={airport.code: airport for airport in airports},

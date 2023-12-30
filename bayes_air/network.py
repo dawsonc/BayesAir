@@ -66,13 +66,11 @@ class NetworkState:
             if (
                 flight.scheduled_departure_time <= time
                 and self.airports[flight.origin].num_available_aircraft > 0
-                and self.airports[flight.origin].num_available_crew > 0
             ):
-                # Remove the aircraft and crew from the airport
+                # Remove the aircraft from the airport
                 aircraft_turnaround_t = self.airports[
                     flight.origin
                 ].available_aircraft.pop(0)
-                crew_turnaround_t = self.airports[flight.origin].available_crew.pop(0)
 
                 # Add the flight to the list of flights ready to depart
                 ready_to_depart_flights.append(flight)
@@ -82,7 +80,6 @@ class NetworkState:
                 ready_time = torch.maximum(
                     aircraft_turnaround_t, flight.scheduled_departure_time
                 )
-                ready_time = torch.maximum(ready_time, crew_turnaround_t)
                 ready_times.append(ready_time)
             elif flight.scheduled_departure_time <= time:
                 # The flight is ready to depart, but the airport does not have an
