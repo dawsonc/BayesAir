@@ -41,7 +41,7 @@ class NetworkState:
         )
 
     def pop_ready_to_depart_flights(
-        self, time: Time, cancellation_probability: torch.tensor
+        self, time: Time, var_prefix: str = ""
     ) -> list[Flight]:
         """Pop all flights from the pending flights list that are able to depart.
 
@@ -49,60 +49,76 @@ class NetworkState:
 
         Args:
             time: The time at which to check for flights ready to depart.
-            cancellation_probability: The probability that a flight will be cancelled
 
         Returns:
             A list of flights that are ready to depart.
             A list of times at which those flights became ready
         """
-        # The pending flights list is already sorted by scheduled departure time, so we
-        # can just iterate through it, removing flights that are ready to depart
-        ready_to_depart_flights = []
-        ready_times = []
+        # Check the flights departing from each airport
+        ready_to_depart_flights_by_airport = {}
         new_pending_flights = []
         for flight in self.pending_flights:
-            # A flight is ready to depart if its scheduled departure time is less
-            # than the current time AND its source airport has an available aircraft
-            if (
-                flight.scheduled_departure_time <= time
-                and self.airports[flight.origin].num_available_aircraft > 0
-            ):
-                # Remove the aircraft from the airport
-                aircraft_turnaround_t = self.airports[
-                    flight.origin
-                ].available_aircraft.pop(0)
+            if flight.scheduled_departure_time <= time:
+                if flight.origin not in ready_to_depart_flights_by_airport:
+                    ready_to_depart_flights_by_airport[flight.origin] = []
 
-                # Add the flight to the list of flights ready to depart
-                ready_to_depart_flights.append(flight)
+                # print(f"{flight} ready to depart")
+                ready_to_depart_flights_by_airport[flight.origin].append(flight)
+            else:
+                new_pending_flights.append(flight)
 
-                # Get the time at which this flight was ready to depart (the later
-                # of the scheduled departure time and the turnaround ready time)
-                ready_time = torch.maximum(
-                    aircraft_turnaround_t, flight.scheduled_departure_time
-                )
-                ready_times.append(ready_time)
-            elif flight.scheduled_departure_time <= time:
-                # The flight is ready to depart, but the airport does not have an
-                # available aircraft, so we need to either delay or cancel
+        # For each airport, check if there are enough available aircraft to depart
+        ready_to_depart_flights = []
+        ready_times = []
+        for airport_code, flights in ready_to_depart_flights_by_airport.items():
+            airport = self.airports[airport_code]
+            num_available_aircraft = airport.num_available_aircraft
+            num_flights_to_depart = len(flights)
+
+            # Cancel some number of flights if there are not enough available aircraft
+            cancellation_probability = 1 - torch.maximum(
+                torch.minimum(
+                    torch.tensor(1.0), num_available_aircraft / num_flights_to_depart
+                ),
+                torch.tensor(0.0),
+            )
+
+            # print(
+            #     f"{airport.code} has {num_available_aircraft} available aircraft; {num_flights_to_depart} flights ready to depart"
+            # )
+            # print(f"Cancel probability: {cancellation_probability}")
+
+            for flight in flights:
                 if flight.simulated_cancelled is None:
-                    # Cancellation decision hasn't been made yet
-                    var_name = str(flight) + "_cancelled"
+                    var_name = var_prefix + str(flight) + "_cancelled"
                     flight.simulated_cancelled = pyro.sample(
                         var_name,
                         dist.RelaxedBernoulliStraightThrough(
-                            0.5,  # temperature
+                            torch.tensor(0.5),  # temperature
                             probs=cancellation_probability,
                         ),
                         obs=flight.actually_cancelled,
                     )
 
-                if flight.simulated_cancelled == 1:
-                    # The flight was cancelled, so add it to the completed flights list
-                    print(f"{flight} cancelled")
+                if flight.simulated_cancelled == 0:
+                    if airport.num_available_aircraft <= 0:
+                        # print(f"{flight} delayed")
+                        new_pending_flights.append(flight)
+                    else:
+                        # print(f"{flight} departs")
+                        ready_to_depart_flights.append(flight)
+                        airport.num_available_aircraft = (
+                            airport.num_available_aircraft - 1
+                        )
+                        aircraft_turnaround_t = airport.available_aircraft.pop(0)
+                        ready_times.append(
+                            torch.maximum(
+                                aircraft_turnaround_t, flight.scheduled_departure_time
+                            )
+                        )
+                else:
+                    # print(f"{flight} cancelled")
                     self.completed_flights.append(flight)
-            else:
-                # Add the flight to the new pending flights list
-                new_pending_flights.append(flight)
 
         # Update the pending flights list
         self.pending_flights = new_pending_flights

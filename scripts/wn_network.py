@@ -115,36 +115,49 @@ def plot_travel_times(
     return fig
 
 
-def plot_cancellation_probability(auto_guide, states, dt, n_samples, wandb=True):
-    """Plot posterior samples of cancellation probability."""
-    # Sample cancelation probability from the posterior
+def plot_starting_aircraft(auto_guide, states, dt, n_samples):
+    """Plot posterior samples of service times."""
+    # Sample mean service time estimates from the posterior
     with pyro.plate("samples", n_samples, dim=-1):
         posterior_samples = auto_guide(states, dt)
 
-    fig = plt.figure(layout="constrained", figsize=(4, 4))
-    axs = fig.subplot_mosaic([["cancel_prob"]])
+    # Make subplots for each airport
+    airport_codes = states[0].airports.keys()
+    n_pairs = len(airport_codes)
+    max_rows = 3
+    max_plots_per_row = n_pairs // max_rows + 1
+    subplot_spec = []
+    for i in range(max_rows):
+        subplot_spec.append(
+            [f"{i * max_plots_per_row +j}" for j in range(max_plots_per_row)]
+        )
 
-    # Put all of the data into a DataFrame to plot it
-    plotting_df = pd.DataFrame(
-        {
-            "Cancellation probability": posterior_samples["cancellation_probability"]
-            .detach()
-            .cpu()
-            .numpy(),
-            "type": "Posterior",
-        }
-    )
+    fig = plt.figure(layout="constrained", figsize=(12, 4 * max_rows))
+    axs = fig.subplot_mosaic(subplot_spec)
 
-    sns.histplot(
-        x="Cancellation probability",
-        hue="type",
-        ax=axs["cancel_prob"],
-        data=plotting_df,
-        color="blue",
-        kde=True,
-    )
-    axs["cancel_prob"].set_xlim(-0.05, 1.05)
-    axs["cancel_prob"].legend()
+    for i, code in enumerate(airport_codes):
+        # Put all of the data into a DataFrame to plot it
+        plotting_df = pd.DataFrame(
+            {
+                code: torch.exp(
+                    posterior_samples[f"{code}_log_initial_available_aircraft"]
+                )
+                .detach()
+                .cpu()
+                .numpy(),
+                "type": "Posterior",
+            }
+        )
+
+        sns.histplot(
+            x=code,
+            hue="type",
+            ax=axs[f"{i}"],
+            data=plotting_df,
+            color="blue",
+            # kde=True,
+        )
+        axs[f"{i}"].set_xlim(-0.05, 30.0)
 
     return fig
 
@@ -187,14 +200,9 @@ def plot_service_times(auto_guide, states, dt, n_samples):
             ax=axs[f"{i}"],
             data=plotting_df,
             color="blue",
-            kde=True,
+            # kde=True,
         )
         axs[f"{i}"].set_xlim(-0.05, 1.05)
-
-        if i == 0:
-            axs[f"{i}"].legend()
-        else:
-            axs[f"{i}"].legend([], [], frameon=False)
 
     return fig
 
@@ -267,11 +275,6 @@ def train(
     for day_df in data[start_day : start_day + days]:
         flights, airports = parse_schedule(day_df)
 
-        # Add starting aircraft to each airport
-        for airport in airports:
-            for _ in range(starting_aircraft):
-                airport.available_aircraft.append(torch.tensor(0.0))
-
         state = NetworkState(
             airports={airport.code: airport for airport in airports},
             pending_flights=flights,
@@ -284,6 +287,7 @@ def train(
 
     # Create an autoguide for the model
     auto_guide = pyro.infer.autoguide.AutoMultivariateNormal(model)
+    # auto_guide = pyro.infer.autoguide.AutoDelta(model)
 
     # Set up SVI
     gamma = 0.1  # final learning rate will be gamma * initial_lr
@@ -308,8 +312,8 @@ def train(
             wandb.log({"Mean service times": wandb.Image(fig)}, commit=False)
             plt.close(fig)
 
-            fig = plot_cancellation_probability(auto_guide, states, dt, n_samples)
-            wandb.log({"Cancellation probability": wandb.Image(fig)}, commit=False)
+            fig = plot_starting_aircraft(auto_guide, states, dt, n_samples)
+            wandb.log({"Starting aircraft": wandb.Image(fig)}, commit=False)
             plt.close(fig)
 
             # Save the params and autoguide

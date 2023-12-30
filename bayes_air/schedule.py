@@ -32,7 +32,7 @@ def parse_flight(schedule_row: tuple) -> Flight:
     actual_arrival_time = schedule_row["actual_arrival_time"]
     wheels_off_time = schedule_row["wheels_off_time"]
     wheels_on_time = schedule_row["wheels_on_time"]
-    cancelled = torch.tensor(1) if schedule_row["cancelled"] else torch.tensor(0)
+    cancelled = torch.tensor(1.0) if schedule_row["cancelled"] else torch.tensor(0.0)
 
     # If the flight was cancelled, set the measured times to None
     if schedule_row["cancelled"]:

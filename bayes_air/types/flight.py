@@ -32,8 +32,8 @@ class Flight:
     destination: AirportCode
     scheduled_departure_time: Time
     scheduled_arrival_time: Time
-    actually_cancelled: torch.tensor  # int
-    simulated_cancelled: Optional[torch.tensor] = None  # int
+    actually_cancelled: torch.tensor
+    simulated_cancelled: Optional[torch.tensor] = None
     simulated_departure_time: Optional[Time] = None
     simulated_arrival_time: Optional[Time] = None
     actual_departure_time: Optional[Time] = None

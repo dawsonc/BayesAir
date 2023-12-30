@@ -11,7 +11,9 @@ from bayes_air.types import QueueEntry
 FAR_FUTURE_TIME = 30.0
 
 
-def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
+def air_traffic_network_model(
+    states: list[NetworkState], delta_t: float = 0.1, max_t: float = FAR_FUTURE_TIME
+):
     """
     Simulate the behavior of an air traffic network.
 
@@ -40,15 +42,17 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
         torch.tensor(0.05),
         constraint=dist.constraints.positive,
     )
-    # Likelihood of cancellation if no aircraft is available
-    cancellation_probability = pyro.sample(
-        "cancellation_probability", dist.Beta(2.0, 2.0)
-    )
 
     # Sample latent variables for airports.
     airport_codes = states[0].airports.keys()
     airport_turnaround_times = {
         code: pyro.sample(f"{code}_mean_turnaround_time", dist.Gamma(1.0, 2.0))
+        for code in airport_codes
+    }
+    airport_initial_available_aircraft = {
+        code: torch.exp(
+            pyro.sample(f"{code}_log_initial_available_aircraft", dist.Normal(0.0, 1.0))
+        )
         for code in airport_codes
     }
     airport_service_times = {
@@ -73,6 +77,7 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
 
         # print(f"============= Starting day {day_ind} =============")
         # print(f"# pending flights: {len(state.pending_flights)}")
+        # print(f"Initial aircraft: {airport_initial_available_aircraft}")
         # print(f"# in-transit flights: {len(state.in_transit_flights)}")
         # print(f"# completed flights: {len(state.completed_flights)}")
         # print("Travel times:")
@@ -87,6 +92,15 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
                 turnaround_time_variation * airport.mean_turnaround_time
             )
 
+            # Initialize the available aircraft list
+            airport.num_available_aircraft = airport_initial_available_aircraft[
+                airport.code
+            ]
+            i = 0
+            while i < airport.num_available_aircraft:
+                airport.available_aircraft.append(torch.tensor(0.0))
+                i += 1
+
         # Simulate the movement of aircraft within the system for a fixed period of time
         t = 0.0
         while not state.complete:
@@ -97,10 +111,19 @@ def air_traffic_network_model(states: list[NetworkState], delta_t: float = 0.1):
             for airport in state.airports.values():
                 airport.update_available_aircraft(t)
 
+            # If the maximum time has elapsed, add lots of reserve aircraft at each
+            # airport. This is artificial and only done to ensure that the simulation
+            # terminates.
+            if t >= max_t:
+                # print(f"TIME'S UP! Adding reserve aircraft at time {t}")
+                for airport in state.airports.values():
+                    airport.num_available_aircraft = airport.num_available_aircraft + 1
+                    airport.available_aircraft.append(torch.tensor(t))
+
             # All flights that are able to depart get moved to the runway queue at their
             # origin airport
             ready_to_depart_flights, ready_times = state.pop_ready_to_depart_flights(
-                t, cancellation_probability
+                t, var_prefix
             )
             for flight, ready_time in zip(ready_to_depart_flights, ready_times):
                 queue_entry = QueueEntry(flight=flight, queue_start_time=ready_time)
