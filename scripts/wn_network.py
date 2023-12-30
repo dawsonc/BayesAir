@@ -1,14 +1,15 @@
 """Run the simulation for a simple two-airport network."""
+import os
 from itertools import combinations
 
 import click
+import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 import pyro
 import seaborn as sns
 import torch
 import tqdm
-from torch.nn.functional import sigmoid
 
 import bayes_air.utils.dataloader as ba_dataloader
 import wandb
@@ -46,13 +47,15 @@ def plot_travel_times(
         # Put all of the data into a DataFrame to plot it
         plotting_df = pd.DataFrame(
             {
-                f"{pair[0]}->{pair[1]}": 6.0
-                * sigmoid(posterior_samples[f"travel_time_{pair[0]}_{pair[1]}"])
+                f"{pair[0]}->{pair[1]}": posterior_samples[
+                    f"travel_time_{pair[0]}_{pair[1]}"
+                ]
                 .detach()
                 .cpu()
                 .numpy(),
-                f"{pair[1]}->{pair[0]}": 6.0
-                * sigmoid(posterior_samples[f"travel_time_{pair[1]}_{pair[0]}"])
+                f"{pair[1]}->{pair[0]}": posterior_samples[
+                    f"travel_time_{pair[1]}_{pair[0]}"
+                ]
                 .detach()
                 .cpu()
                 .numpy(),
@@ -112,7 +115,41 @@ def plot_travel_times(
     return fig
 
 
-def plot_service_times(auto_guide, states, dt, n_samples, wandb=True):
+def plot_cancellation_probability(auto_guide, states, dt, n_samples, wandb=True):
+    """Plot posterior samples of cancellation probability."""
+    # Sample cancelation probability from the posterior
+    with pyro.plate("samples", n_samples, dim=-1):
+        posterior_samples = auto_guide(states, dt)
+
+    fig = plt.figure(layout="constrained", figsize=(4, 4))
+    axs = fig.subplot_mosaic([["cancel_prob"]])
+
+    # Put all of the data into a DataFrame to plot it
+    plotting_df = pd.DataFrame(
+        {
+            "Cancellation probability": posterior_samples["cancellation_probability"]
+            .detach()
+            .cpu()
+            .numpy(),
+            "type": "Posterior",
+        }
+    )
+
+    sns.histplot(
+        x="Cancellation probability",
+        hue="type",
+        ax=axs["cancel_prob"],
+        data=plotting_df,
+        color="blue",
+        kde=True,
+    )
+    axs["cancel_prob"].set_xlim(-0.05, 1.05)
+    axs["cancel_prob"].legend()
+
+    return fig
+
+
+def plot_service_times(auto_guide, states, dt, n_samples):
     """Plot posterior samples of service times."""
     # Sample mean service time estimates from the posterior
     with pyro.plate("samples", n_samples, dim=-1):
@@ -136,8 +173,7 @@ def plot_service_times(auto_guide, states, dt, n_samples, wandb=True):
         # Put all of the data into a DataFrame to plot it
         plotting_df = pd.DataFrame(
             {
-                code: 0.25
-                * sigmoid(posterior_samples[f"{code}_mean_service_time"])
+                code: posterior_samples[f"{code}_mean_service_time"]
                 .detach()
                 .cpu()
                 .numpy(),
@@ -153,7 +189,7 @@ def plot_service_times(auto_guide, states, dt, n_samples, wandb=True):
             color="blue",
             kde=True,
         )
-        axs[f"{i}"].set_xlim(-0.01, 0.26)
+        axs[f"{i}"].set_xlim(-0.05, 1.05)
 
         if i == 0:
             axs[f"{i}"].legend()
@@ -163,10 +199,15 @@ def plot_service_times(auto_guide, states, dt, n_samples, wandb=True):
     return fig
 
 
-def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
+def train(
+    top_n, days, svi_steps, n_samples, svi_lr, plot_every, start_day=0, nominal=True
+):
     pyro.clear_param_store()  # avoid leaking parameters across runs
     pyro.enable_validation(True)
     pyro.set_rng_seed(1)
+
+    # Avoid plotting error
+    matplotlib.use("Agg")
 
     # Set the number of starting aircraft and crews at each airport
     starting_crew = 50
@@ -178,14 +219,21 @@ def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
     # Load the dataset
     df = pd.read_pickle("data/wn_data_clean.pkl")
     df = ba_dataloader.top_N_df(df, top_n)
-    nominal_df, _ = ba_dataloader.split_nominal_disrupted_data(df)
+    nominal_df, disrupted_df = ba_dataloader.split_nominal_disrupted_data(df)
     nominal_dfs = ba_dataloader.split_by_date(nominal_df)
+    disrupted_dfs = ba_dataloader.split_by_date(disrupted_df)
 
-    num_flights = sum([len(df) for df in nominal_dfs[:days]])
+    # Use nominal or disrupted data
+    if nominal:
+        data = nominal_dfs
+    else:
+        data = disrupted_dfs
+
+    num_flights = sum([len(df) for df in data[start_day : start_day + days]])
     print(f"Number of flights: {num_flights}")
 
     # Estimate travel times between each pair
-    example_day_df = nominal_dfs[0]
+    example_day_df = data[start_day]
     example_day_df["travel_time"] = (
         example_day_df["actual_arrival_time"] - example_day_df["actual_departure_time"]
     )
@@ -195,11 +243,14 @@ def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
         .reset_index()
     )
 
-    # Convert each day into a schedule
-    states = []  # Initialize wandb
+    # Initialize wandb
+    run_name = f"top_{top_n}_"
+    run_name += f"{'nominal' if nominal else 'disrupted'}_"
+    run_name += f"days_{start_day}_{start_day + days}"
     wandb.init(
         project="bayes-air",
-        name=f"top-{top_n}-nominal-{days}-days",
+        name=run_name,
+        group="nominal" if nominal else "disrupted",
         config={
             "type": "nominal",
             "starting_crew": starting_crew,
@@ -212,7 +263,10 @@ def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
             "n_samples": n_samples,
         },
     )
-    for day_df in nominal_dfs[:days]:
+
+    # Convert each day into a schedule
+    states = []
+    for day_df in data[start_day : start_day + days]:
         flights, airports = parse_schedule(day_df)
 
         # Add starting aircraft and crew to each airport
@@ -236,9 +290,11 @@ def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
     auto_guide = pyro.infer.autoguide.AutoMultivariateNormal(model)
 
     # Set up SVI
-    adam = pyro.optim.Adam({"lr": svi_lr})
+    gamma = 0.1  # final learning rate will be gamma * initial_lr
+    lrd = gamma ** (1 / svi_steps)
+    optim = pyro.optim.ClippedAdam({"lr": svi_lr, "lrd": lrd})
     elbo = pyro.infer.Trace_ELBO()
-    svi = pyro.infer.SVI(model, auto_guide, adam, elbo)
+    svi = pyro.infer.SVI(model, auto_guide, optim, elbo)
 
     losses = []
     pbar = tqdm.tqdm(range(svi_steps))
@@ -249,74 +305,52 @@ def train(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
 
         if i % plot_every == 0 or i == svi_steps - 1:
             fig = plot_travel_times(auto_guide, states, dt, n_samples, travel_times)
-            wandb.log({"Travel times": fig}, commit=False)
+            wandb.log({"Travel times": wandb.Image(fig)}, commit=False)
             plt.close(fig)
 
-            fig = plot_service_times(auto_guide, states, dt, n_samples, travel_times)
-            wandb.log({"Service times": wandb.Image(fig)}, commit=False)
+            fig = plot_service_times(auto_guide, states, dt, n_samples)
+            wandb.log({"Mean service times": wandb.Image(fig)}, commit=False)
             plt.close(fig)
+
+            fig = plot_cancellation_probability(auto_guide, states, dt, n_samples)
+            wandb.log({"Cancellation probability": wandb.Image(fig)}, commit=False)
+            plt.close(fig)
+
+            # Save the params and autoguide
+            dir_path = os.path.dirname(__file__)
+            save_path = os.path.join(dir_path, "..", "checkpoints", run_name, f"{i}")
+            os.makedirs(save_path, exist_ok=True)
+            pyro.get_param_store().save(os.path.join(save_path, "params.pth"))
+            torch.save(auto_guide.state_dict(), os.path.join(save_path, "guide.pth"))
 
         wandb.log({"ELBO": loss})
 
     return loss
 
 
-def train_from_config(config):
-    return train(
-        config.top_n,
-        config.days,
-        config.svi_steps,
-        config.n_samples,
-        config.svi_lr,
-        config.plot_every,
-    )
-
-
-def train_sweep():
-    wandb.init(project="bayes-air")
-    train_from_config(wandb.config)
-
-
 @click.command()
+@click.option("--disrupted", is_flag=True, help="Use disrupted data")
 @click.option("--top-n", default=2, help="Number of airports to include in the network")
-@click.option("--days", default=18, help="Number of days to simulate")
+@click.option("--days", default=2, help="Number of days to simulate")
+@click.option("--start-day", default=0, help="Index of day to start with")
 @click.option("--svi-steps", default=1000, help="Number of SVI steps to run")
 @click.option("--n-samples", default=800, help="Number of posterior samples to draw")
-@click.option("--svi-lr", default=1e-2, help="Learning rate for SVI")
+@click.option("--svi-lr", default=1e-3, help="Learning rate for SVI")
 @click.option("--plot-every", default=100, help="Plot every N steps")
-def train_cmd(top_n, days, svi_steps, n_samples, svi_lr, plot_every):
-    # Initialize wandb
-    wandb.init(
-        project="bayes-air",
-        name=f"top-{top_n}-nominal-{days}-days",
-        config={
-            "type": "nominal",
-            "top_n": top_n,
-            "days": days,
-            "svi_lr": svi_lr,
-            "svi_steps": svi_steps,
-            "n_samples": n_samples,
-        },
+def train_cmd(
+    disrupted, top_n, days, start_day, svi_steps, n_samples, svi_lr, plot_every
+):
+    train(
+        top_n,
+        days,
+        svi_steps,
+        n_samples,
+        svi_lr,
+        plot_every,
+        start_day=start_day,
+        nominal=not disrupted,
     )
-
-    train(top_n, days, svi_steps, n_samples, svi_lr, plot_every)
 
 
 if __name__ == "__main__":
-    # sweep_configuration = {
-    #     "method": "grid",
-    #     "metric": {"goal": "minimize", "name": "ELBO"},
-    #     "parameters": {
-    #         "top_n": {"values": [2]},
-    #         "days": {"values": [2, 5, 10, 18]},
-    #         "svi_steps": {"value": 10000},
-    #         "n_samples": {"value": 800},
-    #         "plot_every": {"value": 500},
-    #         "svi_lr": {"values": [1e-2, 1e-3, 1e-4]},
-    #     },
-    # }
-
-    # # Start the sweep
-    # sweep_id = wandb.sweep(sweep=sweep_configuration, project="bayes-air")
-    # wandb.agent(sweep_id, function=train_sweep, count=10)
-    train_sweep()
+    train_cmd()

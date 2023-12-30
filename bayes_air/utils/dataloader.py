@@ -34,6 +34,9 @@ def load_all_data():
     # Concatenate the two DataFrames
     df = pd.concat([nominal_df, disrupted_df])
 
+    # De-duplicate rows
+    df = df.drop_duplicates()
+
     return df, airport_locations_df
 
 
@@ -161,6 +164,9 @@ def remap_columns(df, airport_locations_df):
         "Scheduled Arrival Time": "scheduled_arrival_time",
         "Actual Departure Time": "actual_departure_time",
         "Actual Arrival Time": "actual_arrival_time",
+        "Wheels On Time": "wheels_on_time",
+        "Wheels Off Time": "wheels_off_time",
+        "Cancelled Flight": "cancelled",
     }
 
     # Filter the original DataFrame based on the desired columns
@@ -197,22 +203,33 @@ def remap_columns(df, airport_locations_df):
     )
     remapped_df = remapped_df.rename(columns={"time_zone": "destination_time_zone"})
 
+    # Convert "yes/no" to True/False in the cancelled column
+    remapped_df["cancelled"] = remapped_df["cancelled"] == "Yes"
+
     # Convert all times to hours since midnight
     remapped_df["scheduled_departure_time"] = convert_to_float_hours_optimized(
         remapped_df["scheduled_departure_time"],
+        remapped_df["origin_time_zone"],
+    )
+    remapped_df["actual_departure_time"] = convert_to_float_hours_optimized(
+        remapped_df["actual_departure_time"],
+        remapped_df["origin_time_zone"],
+    )
+    remapped_df["wheels_off_time"] = convert_to_float_hours_optimized(
+        remapped_df["wheels_off_time"],
         remapped_df["origin_time_zone"],
     )
     remapped_df["scheduled_arrival_time"] = convert_to_float_hours_optimized(
         remapped_df["scheduled_arrival_time"],
         remapped_df["destination_time_zone"],
     )
-    remapped_df["actual_departure_time"] = convert_to_float_hours_optimized(
-        remapped_df["actual_departure_time"],
-        remapped_df["origin_time_zone"],
-    )
     remapped_df["actual_arrival_time"] = convert_to_float_hours_optimized(
         remapped_df["actual_arrival_time"],
         remapped_df["destination_time_zone"],
+    )
+    remapped_df["wheels_on_time"] = convert_to_float_hours_optimized(
+        remapped_df["wheels_on_time"],
+        remapped_df["origin_time_zone"],
     )
 
     # If a flight is en-route at midnight, it's duration will be negative unless we add 24 hours
@@ -223,9 +240,13 @@ def remap_columns(df, airport_locations_df):
     actual_duration = (
         remapped_df.actual_arrival_time - remapped_df.actual_departure_time
     )
+    wheels_up_duration = remapped_df.wheels_on_time - remapped_df.wheels_off_time
     remapped_df.loc[
         actual_duration < 0, "actual_arrival_time"
     ] += 24  # Add 24 hours to actual arrival time
+    remapped_df.loc[
+        wheels_up_duration < 0, "wheels_on_time"
+    ] += 24  # Add 24 hours to wheels on time
     remapped_df.loc[
         scheduled_duration < 0, "scheduled_arrival_time"
     ] += 24  # Add 24 hours to scheduled arrival time
@@ -242,6 +263,14 @@ def remap_columns(df, airport_locations_df):
         departure_delay < -3.0,
         "actual_departure_time",
     ] += 24  # Add 24 hours to actual departure time
+    remapped_df.loc[
+        departure_delay < -3.0,
+        "wheels_off_time",
+    ] += 24  # Add 24 hours to wheels off time
+    remapped_df.loc[
+        departure_delay < -3.0,
+        "wheels_on_time",
+    ] += 24  # Add 24 hours to wheels on time
     remapped_df.loc[
         departure_delay < -3.0,
         "actual_arrival_time",

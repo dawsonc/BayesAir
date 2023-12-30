@@ -7,12 +7,12 @@ parameters:
   top_n:
     values: [2]
   days:
-    values: [2, 5, 10, 18]
+    values: [2]
   svi_steps:
-    value: 50000
+    value: 500
   n_samples:
     value: 800
   plot_every:
     value: 500
   svi_lr:
-    values: [1e-4]
+    values: [1e-2]

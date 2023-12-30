@@ -180,19 +180,14 @@ class Airport:
             queue_entry: The queue entry for the flight to assign a departure time to.
             var_prefix: prefix for sampled variable names.
         """
-        # TODO should this be sampling or deterministic
         queue_entry.flight.simulated_departure_time = pyro.sample(
             var_prefix + str(queue_entry.flight) + "_simulated_departure_time",
             dist.Normal(
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
             ),
-            # TODO should we observe here or at the end of the simulation?
             obs=queue_entry.flight.actual_departure_time,
         )
-        # queue_entry.flight.simulated_departure_time = (
-        #     queue_entry.queue_start_time + queue_entry.total_wait_time
-        # )
 
         # print(
         #     f"\t{queue_entry.flight} departing at {queue_entry.flight.simulated_departure_time} (entered queue {queue_entry.queue_start_time} and waited {queue_entry.total_wait_time})"
@@ -207,19 +202,14 @@ class Airport:
             queue_entry: The queue entry for the flight to assign a arrival time to.
             var_prefix: prefix for sampled variable names.
         """
-        # TODO should this be sampling or deterministic?
         queue_entry.flight.simulated_arrival_time = pyro.sample(
             var_prefix + str(queue_entry.flight) + "_simulated_arrival_time",
             dist.Normal(
                 queue_entry.queue_start_time + queue_entry.total_wait_time,
                 self.runway_use_time_std_dev,
             ),
-            # TODO should we observe here or at the end of the simulation?
             obs=queue_entry.flight.actual_arrival_time,
         )
-        # queue_entry.flight.simulated_arrival_time = (
-        #     queue_entry.queue_start_time + queue_entry.total_wait_time
-        # )
 
         # print(
         #     f"\t{queue_entry.flight} arriving at {queue_entry.flight.simulated_arrival_time} (entered queue {queue_entry.queue_start_time} and waited {queue_entry.total_wait_time})"

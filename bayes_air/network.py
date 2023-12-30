@@ -40,13 +40,16 @@ class NetworkState:
             and all([len(a.runway_queue) == 0 for a in self.airports.values()])
         )
 
-    def pop_ready_to_depart_flights(self, time: Time) -> list[Flight]:
+    def pop_ready_to_depart_flights(
+        self, time: Time, cancellation_probability: torch.tensor
+    ) -> list[Flight]:
         """Pop all flights from the pending flights list that are able to depart.
 
         Modifies the pending_flights list.
 
         Args:
             time: The time at which to check for flights ready to depart.
+            cancellation_probability: The probability that a flight will be cancelled
 
         Returns:
             A list of flights that are ready to depart.
@@ -81,6 +84,25 @@ class NetworkState:
                 )
                 ready_time = torch.maximum(ready_time, crew_turnaround_t)
                 ready_times.append(ready_time)
+            elif flight.scheduled_departure_time <= time:
+                # The flight is ready to depart, but the airport does not have an
+                # available aircraft, so we need to either delay or cancel
+                if flight.simulated_cancelled is None:
+                    # Cancellation decision hasn't been made yet
+                    var_name = str(flight) + "_cancelled"
+                    flight.simulated_cancelled = pyro.sample(
+                        var_name,
+                        dist.RelaxedBernoulliStraightThrough(
+                            0.5,  # temperature
+                            probs=cancellation_probability,
+                        ),
+                        obs=flight.actually_cancelled,
+                    )
+
+                if flight.simulated_cancelled == 1:
+                    # The flight was cancelled, so add it to the completed flights list
+                    print(f"{flight} cancelled")
+                    self.completed_flights.append(flight)
             else:
                 # Add the flight to the new pending flights list
                 new_pending_flights.append(flight)
