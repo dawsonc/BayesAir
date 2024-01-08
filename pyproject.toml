@@ -23,6 +23,7 @@ pytz = "^2023.3.post1"
 wandb = "^0.16.1"
 plotly = "^5.18.0"
 click = "^8.1.7"
+zuko = "^1.0.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.1.1"
