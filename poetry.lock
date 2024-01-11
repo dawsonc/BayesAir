@@ -373,6 +373,19 @@ files = [
 ]
 
 [[package]]
+name = "deepwave"
+version = "0.0.20"
+description = "Wave propagation modules for PyTorch"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "deepwave-0.0.20.tar.gz", hash = "sha256:ff7485e10d4d7a71841e98b8857df4676ad79a8b8a5c334e632065a4693f404a"},
+]
+
+[package.dependencies]
+torch = "*"
+
+[[package]]
 name = "docker-pycreds"
 version = "0.4.0"
 description = "Python bindings for the docker credentials store API"
@@ -2600,4 +2613,4 @@ torch = ">=1.12.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "<3.12,>=3.9"
-content-hash = "fc23c02de2e09c01a58f92464997a90940a503251fc3e2a1ef6216d7c335e3c6"
+content-hash = "8a59ce0e920b1af37a70ff65e7722bed297d8b38da7326600da28ef119cc7b03"
