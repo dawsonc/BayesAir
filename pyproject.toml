@@ -25,6 +25,7 @@ plotly = "^5.18.0"
 click = "^8.1.7"
 zuko = "^1.0.1"
 deepwave = "^0.0.20"
+ipympl = "^0.9.3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.1.1"
