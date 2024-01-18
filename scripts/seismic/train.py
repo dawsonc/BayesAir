@@ -174,7 +174,7 @@ def plot_logprob_calibration(
                 N=n_failure,
                 receiver_observations=failure_observations,
             )
-            elbos.append(result[0])
+            elbos.append(-result[0])
             logprobs.append(result[1])
 
         logprobs = torch.stack(logprobs).reshape(-1)
@@ -353,7 +353,7 @@ def train(
             # loss += divergence_weight * failure_divergence
             samples = failure_guide(failure_label).rsample((num_divergence_particles,))
             nominal_logprob = nominal_guide(nominal_label).log_prob(samples).mean()
-            loss -= divergence_weight * nominal_logprob
+            loss -= divergence_weight * nominal_logprob / (NX_COARSE * NY_COARSE)
 
         # Step the optimizer
         loss.backward()
