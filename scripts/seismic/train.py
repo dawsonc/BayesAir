@@ -353,7 +353,7 @@ def train(
             # loss += divergence_weight * failure_divergence
             samples = failure_guide(failure_label).rsample((num_divergence_particles,))
             nominal_logprob = nominal_guide(nominal_label).log_prob(samples).mean()
-            loss += divergence_weight * nominal_logprob
+            loss -= divergence_weight * nominal_logprob
 
         # Step the optimizer
         loss.backward()
@@ -440,7 +440,7 @@ def train(
 @click.option("--no-amortize", is_flag=True, help="Don't amortize the guide")
 @click.option("--regularize", is_flag=True, help="Regularize failure using nominal")
 @click.option("--seed", default=0, help="Random seed")
-@click.option("--num-steps", default=400, type=int, help="Number of steps")
+@click.option("--num-steps", default=300, type=int, help="Number of steps")
 @click.option("--lr", default=1e-2, type=float, help="Learning rate")
 @click.option("--lr-gamma", default=0.1, type=float, help="Learning rate decay")
 @click.option("--lr-steps", default=200, type=int, help="Steps per learning rate decay")
