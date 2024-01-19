@@ -72,7 +72,7 @@ def seismic_model(
         "profile",
         dist.Normal(
             torch.zeros(NY_COARSE, NX_COARSE, device=device),
-            2.5 * torch.ones(NY_COARSE, NX_COARSE, device=device),
+            0.5 * torch.ones(NY_COARSE, NX_COARSE, device=device),
         ),
     )
     vp = profile * VP_SCALE + VP_CENTER

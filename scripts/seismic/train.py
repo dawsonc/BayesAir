@@ -130,7 +130,7 @@ def plot_label_calibration(
     )
     ax.plot(
         x,
-        divergences.detach().cpu() * failure_divergence.detach().cpu(),
+        divergences.detach().cpu(),
         "b-",
         label="Measured",
     )
@@ -165,11 +165,14 @@ def plot_logprob_calibration(
     with torch.no_grad():
         logprobs = []
         elbos = []
-        for x in torch.linspace(0.0, 1.0, divergence_bounds.shape[0]):
+        for x in torch.linspace(
+            0.0, 1.0, divergence_bounds.shape[0], device=failure_label.device
+        ):
+            print("Computing logprob for label", x)
             result = elbo_loss(
                 seismic_model,
                 failure_guide,
-                failure_label,
+                x.reshape(1),
                 num_elbo_particles,
                 N=n_failure,
                 receiver_observations=failure_observations,
@@ -182,7 +185,7 @@ def plot_logprob_calibration(
 
     # First plot shows KL divergence vs evidence
     ax[0].plot(
-        divergences.detach().cpu() * failure_divergence.detach().cpu(),
+        divergences.detach().cpu(),
         logprobs.detach().cpu(),
         "bo",
         label="Measured",
@@ -192,7 +195,7 @@ def plot_logprob_calibration(
 
     # Second plot shows KL divergence vs ELBO
     ax[1].plot(
-        divergences.detach().cpu() * failure_divergence.detach().cpu(),
+        divergences.detach().cpu(),
         elbos.detach().cpu(),
         "bo",
         label="Measured",
@@ -322,26 +325,26 @@ def train(
 
         # Re-scale the divergence to [0, 1] (since we're using unbounded KL divergence)
         # Use the divergence at label=1 as the reference point
-        failure_divergence = loss_components["divergence"][-1].clone()
-        loss_components["divergence"] /= failure_divergence + 1e-3
+        failure_divergence = loss_components["divergence"][-1]
 
         # Compute the calibration loss based on the elbo and the deviation from
         # divergence bounds
-        loss_components["divergence_deviation"] = torch.nn.functional.relu(
-            loss_components["divergence"] - divergence_bounds
+        loss_components["divergence_deviation"] = (
+            (
+                loss_components["divergence"]
+                / (loss_components["divergence"].max() + 1e-3)
+                - divergence_bounds
+            )
+            ** 2
         ).mean()
 
         # Compute the loss
         loss = torch.tensor(0.0).to(device)
         loss += (
-            elbo_weight
-            * loss_components["nominal_elbo"][0]
-            / (n_nominal * NY_COARSE * NX_COARSE)
+            elbo_weight * loss_components["nominal_elbo"][0] / (NY_COARSE * NX_COARSE)
         )
         loss += (
-            elbo_weight
-            * loss_components["failure_elbo"][0]
-            / (n_failure * NY_COARSE * NX_COARSE)
+            elbo_weight * loss_components["failure_elbo"][0] / (NY_COARSE * NX_COARSE)
         )
         loss += (
             divergence_weight
@@ -350,10 +353,10 @@ def train(
         )
 
         if regularize:
-            # loss += divergence_weight * failure_divergence
-            samples = failure_guide(failure_label).rsample((num_divergence_particles,))
-            nominal_logprob = nominal_guide(nominal_label).log_prob(samples).mean()
-            loss -= divergence_weight * nominal_logprob / (NX_COARSE * NY_COARSE)
+            loss += divergence_weight * failure_divergence
+            # samples = failure_guide(failure_label).rsample((num_divergence_particles,))
+            # nominal_logprob = nominal_guide(nominal_label).log_prob(samples).mean()
+            # loss -= divergence_weight * nominal_logprob / (NX_COARSE * NY_COARSE)
 
         # Step the optimizer
         loss.backward()
@@ -460,7 +463,7 @@ def train(
 )
 @click.option(
     "--num-divergence-points",
-    default=20,
+    default=10,
     type=int,
     help="number of points for divergence calibration",
 )
@@ -552,9 +555,9 @@ def run(
     run_name += "_ours" if (amortize and calibrate and not regularize) else ""
     run_name += "_amortized" if amortize else "_unamortized"
     run_name += "_calibrated" if calibrate else "_uncalibrated"
-    run_name += "_regularized" if regularize else "_unregularized"
+    run_name += "_regularized_kl" if regularize else "_unregularized"
     wandb.init(
-        project="swi_proper_kl_debug",
+        project="swi",
         name=run_name,
         group=run_name,
         config={
