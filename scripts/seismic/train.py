@@ -44,7 +44,7 @@ def plot_posterior(
     failure_guide,
     nominal_label,
     failure_label,
-    samples=10,
+    samples=100,
     save_file_name=None,
     save_wandb=True,
 ):
@@ -78,18 +78,15 @@ def plot_posterior(
 
 def plot_posterior_interp(
     failure_guide,
-    failure_label,
-    samples=10,
-    n_steps=10,
+    bounds,
+    samples=100,
     save_file_name=None,
     save_wandb=True,
 ):
     """Plot the interpolated posterior distribution between the two cases."""
-    n_steps = 10
-    steps = torch.linspace(0.0, 1.0, n_steps, device=failure_label.device)
-    fig, axs = plt.subplots(1, n_steps, figsize=(4 * n_steps, 4))
+    fig, axs = plt.subplots(1, bounds.shape[0], figsize=(4 * bounds.shape[0], 4))
     with torch.no_grad():
-        for idx, label in enumerate(steps):
+        for idx, label in enumerate(bounds):
             axs[idx].imshow(
                 failure_guide(label.reshape(1))
                 .sample((samples,))
@@ -160,48 +157,44 @@ def plot_logprob_calibration(
     save_wandb=True,
 ):
     """Plot the KL calibration curve."""
-    fig, ax = plt.subplots(2, 1, figsize=(4, 8))
+    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
 
-    with torch.no_grad():
-        logprobs = []
-        elbos = []
-        for x in torch.linspace(
-            0.0, 1.0, divergence_bounds.shape[0], device=failure_label.device
-        ):
-            print("Computing logprob for label", x)
-            result = elbo_loss(
-                seismic_model,
-                failure_guide,
-                x.reshape(1),
-                num_elbo_particles,
-                N=n_failure,
-                receiver_observations=failure_observations,
-            )
-            elbos.append(-result[0])
-            logprobs.append(result[1])
+    elbos = []
+    elbo_grads = []
+    for x in divergence_bounds:
+        x.requires_grad_(True)
+        result = elbo_loss(
+            seismic_model,
+            failure_guide,
+            x.reshape(1),
+            num_elbo_particles,
+            N=n_failure,
+            receiver_observations=failure_observations,
+        )
+        elbo = -result[0]
+        elbo.backward()
+        elbos.append(elbo.detach().item())
+        elbo_grads.append(x.grad.detach().item())
 
-        logprobs = torch.stack(logprobs).reshape(-1)
-        elbos = torch.stack(elbos).reshape(-1)
-
-    # First plot shows KL divergence vs evidence
-    ax[0].plot(
+    # Plot KL divergence vs ELBO
+    ax.plot(
         divergences.detach().cpu(),
-        logprobs.detach().cpu(),
-        "bo",
-        label="Measured",
+        elbos,
+        "bo-",
     )
-    ax[0].set_xlabel("KL Divergence")
-    ax[0].set_ylabel("Failure Log Probability")
+    ax.set_xlabel("KL Divergence")
+    ax.set_ylabel("Failure ELBO")
 
-    # Second plot shows KL divergence vs ELBO
-    ax[1].plot(
+    # Plot the gradient of the ELBO wrt the divergence bound on the right axis
+    ax2 = ax.twinx()
+    ax2.plot(
         divergences.detach().cpu(),
-        elbos.detach().cpu(),
-        "bo",
-        label="Measured",
+        elbo_grads,
+        "ro-",
     )
-    ax[1].set_xlabel("KL Divergence")
-    ax[1].set_ylabel("Failure ELBO")
+    ax2.set_ylabel("d_ELBO / d_KL")
+    # Make the right axis red to match the line color
+    ax2.spines["right"].set_color("red")
 
     fig.tight_layout()
 
@@ -233,6 +226,7 @@ def train(
     num_divergence_particles,
     num_divergence_points,
     divergence_weight,
+    regularization_weight,
     elbo_weight,
 ):
     """
@@ -258,6 +252,7 @@ def train(
         num_divergence_particles: number of particles for divergence estimation
         num_divergence_points: number of points for divergence calibration
         divergence_weight: weight applied to calibration loss
+        regularization_weight: weight applied to nominal divergence loss
         elbo_weight: weight applied to ELBO loss
     """
     device = nominal_observations.device
@@ -287,7 +282,7 @@ def train(
 
     # Create the labels for training
     nominal_label = torch.tensor([0.0], device=device)
-    failure_label = torch.tensor([1.0], device=device)
+    failure_label = torch.tensor([1.0], device=device, requires_grad=True)
     divergence_bounds = torch.linspace(0.0, 1.0, num_divergence_points).to(device)
     nominal_context = torch.tensor([[0.0]] * num_divergence_points).to(device)
 
@@ -295,6 +290,7 @@ def train(
     pbar = tqdm(range(num_steps))
     for i in pbar:
         optim.zero_grad()
+        failure_label.grad = None
 
         # Compute the loss components
         loss_components = {
@@ -353,16 +349,33 @@ def train(
         )
 
         if regularize:
-            loss += divergence_weight * failure_divergence
-            # samples = failure_guide(failure_label).rsample((num_divergence_particles,))
-            # nominal_logprob = nominal_guide(nominal_label).log_prob(samples).mean()
-            # loss -= divergence_weight * nominal_logprob / (NX_COARSE * NY_COARSE)
+            loss += regularization_weight * failure_divergence
 
         # Step the optimizer
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(params, grad_clip)
         optim.step()
         scheduler.step()
+
+        # Get the gradient of the failure ELBO wrt the divergence bound
+        failure_label.grad = None
+        elbo = -elbo_loss(
+            seismic_model,
+            failure_guide,
+            failure_label,
+            num_elbo_particles,
+            N=n_failure,
+            receiver_observations=failure_observations,
+        )[0]
+        elbo.backward()
+        d_elbo_d_label = failure_label.grad
+        # d_loss_d_label = failure_label.grad
+        # d_loss_d_elbo = elbo_weight / (NY_COARSE * NX_COARSE)
+        # d_elbo_d_label = d_loss_d_label / d_loss_d_elbo
+
+        # Convert to gradient wrt KL divergence
+        d_label_d_kl = 1 / failure_divergence
+        d_elbo_d_kl = d_elbo_d_label * d_label_d_kl
 
         # Record progress
         if i % 10 == 0 or i == num_steps - 1:
@@ -392,7 +405,7 @@ def train(
             )
             plot_posterior_interp(
                 failure_guide,
-                failure_label,
+                divergence_bounds,
                 save_file_name=name + "_posterior_interpolated.png",
             )
             if amortize:
@@ -431,14 +444,15 @@ def train(
                 .cpu()
                 .item(),
                 "Gradient norm": grad_norm.detach().cpu().item(),
+                "d_ELBO_d_KL": d_elbo_d_kl.detach().cpu().item(),
             }
         )
         pbar.set_description(f"Loss: {loss.item():.4f}")
 
 
 @click.command()
-@click.option("--N-nominal", default=25, help="Number of nominal examples")
-@click.option("--N-failure", default=3, help="Number of failure examples")
+@click.option("--N-nominal", default=50, help="Number of nominal examples")
+@click.option("--N-failure", default=2, help="Number of failure examples")
 @click.option("--no-calibrate", is_flag=True, help="Don't use KL calibration")
 @click.option("--no-amortize", is_flag=True, help="Don't amortize the guide")
 @click.option("--regularize", is_flag=True, help="Regularize failure using nominal")
@@ -474,6 +488,12 @@ def train(
     help="weight applied to calibration loss",
 )
 @click.option(
+    "--regularization-weight",
+    default=1e0,
+    type=float,
+    help="weight applied to nominal divergence loss",
+)
+@click.option(
     "--elbo-weight", default=1e0, type=float, help="weight applied to ELBO loss"
 )
 def run(
@@ -493,6 +513,7 @@ def run(
     num_divergence_particles,
     num_divergence_points,
     divergence_weight,
+    regularization_weight,
     elbo_weight,
 ):
     """Generate data and train the SWI model."""
@@ -513,6 +534,10 @@ def run(
         # Nominal has a layer of higher vp, vs, and rho in the middle
         profile_nominal = profile_background.expand(n_nominal, -1, -1).clone()
         profile_nominal[:, 3:6, 1:9] = 1.0
+        fracture_variation = 0.5 * torch.randn(n_nominal).to(device).reshape(-1, 1, 1)
+        profile_nominal[:, 3:6, 4:6] += fracture_variation
+        profile_nominal[:, 3:6, :1] -= fracture_variation
+        profile_nominal[:, 3:6, 9:] -= fracture_variation
         profile_nominal += 0.2 * torch.randn_like(profile_nominal)
 
         # Failure has a break in the middle of the layer
@@ -557,7 +582,7 @@ def run(
     run_name += "_calibrated" if calibrate else "_uncalibrated"
     run_name += "_regularized_kl" if regularize else "_unregularized"
     wandb.init(
-        project="swi",
+        project="swi-debug",
         name=run_name,
         group=run_name,
         config={
@@ -577,9 +602,14 @@ def run(
             "num_divergence_particles": num_divergence_particles,
             "num_divergence_points": num_divergence_points,
             "divergence_weight": divergence_weight,
+            "regularization_weight": regularization_weight,
             "elbo_weight": elbo_weight,
         },
     )
+
+    # Add a bit to the run name to distinguish it from other runs
+    if regularize:
+        run_name += "_beta_{:.2f}".format(regularization_weight)
 
     # Make a directory for checkpoints if it doesn't already exist
     os.makedirs(f"checkpoints/swi/{run_name}", exist_ok=True)
@@ -604,6 +634,7 @@ def run(
         num_divergence_particles=num_divergence_particles,
         num_divergence_points=num_divergence_points,
         divergence_weight=divergence_weight,
+        regularization_weight=regularization_weight,
         elbo_weight=elbo_weight,
     )
 

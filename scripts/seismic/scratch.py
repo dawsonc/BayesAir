@@ -5,7 +5,7 @@ import torch
 import zuko
 
 from scripts.seismic.model import NX_COARSE, NY_COARSE, seismic_model
-from scripts.seismic.train import plot_posterior, plot_posterior_interp
+from scripts.seismic.train import elbo_loss
 
 
 def load_flow(flow_path, device):
@@ -16,14 +16,14 @@ def load_flow(flow_path, device):
     return flow
 
 
-@torch.no_grad()
-def eval(name):
+if __name__ == "__main__":
     seed = 0
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(seed)
     pyro.set_rng_seed(seed)
 
     # Load a trained flow and plot the log probability calibration
+    name = "swi_vi_ours_amortized_calibrated_unregularized"
     flow_path = "checkpoints/swi/" + name + "/checkpoint_299.pth"
     guide = load_flow(flow_path, device=device)
 
@@ -53,67 +53,22 @@ def eval(name):
             )
         failure_observations = torch.cat(failure_observations)
 
-    num_elbo_particles = 50
-    num_divergence_particles = 100
+    num_elbo_particles = 10
+    num_divergence_particles = 10
     num_divergence_points = 10
     nominal_label = torch.tensor([0.0], device=device)
     failure_label = torch.tensor([1.0], device=device)
     divergence_bounds = torch.linspace(0.0, 1.0, num_divergence_points).to(device)
     nominal_context = torch.tensor([[0.0]] * num_divergence_points).to(device)
 
-    # # Get the divergences
-    # print("Computing divergences...")
-    # divergences = kl_divergence(
-    #     guide,
-    #     guide,
-    #     divergence_bounds.reshape(-1, 1),
-    #     nominal_context,
-    #     num_divergence_particles,
-    # )
-    # failure_divergence = divergences[-1]
-    # print("Done.")
-
-    # print("Plotting calibration...")
-    # plot_logprob_calibration(
-    #     guide,
-    #     failure_label,
-    #     num_elbo_particles,
-    #     n_failure,
-    #     failure_observations,
-    #     divergence_bounds,
-    #     failure_divergence,
-    #     divergences,
-    #     save_file_name="eval_" + name + "_calibration_logprob_evidence.png",
-    #     save_wandb=False,
-    # )
-    # print("Done.")
-
-    print("Plotting posterior...")
-    plot_posterior(
+    # What is the derivative of the ELBO wrt the divergence bound?
+    result = elbo_loss(
+        seismic_model,
         guide,
-        guide,
-        nominal_label,
         failure_label,
-        save_file_name="eval_" + name + "_posterior.png",
-        samples=1000,
-        save_wandb=False,
+        num_elbo_particles,
+        N=n_failure,
+        receiver_observations=failure_observations,
     )
-    plot_posterior_interp(
-        guide,
-        divergence_bounds,
-        save_file_name="eval_" + name + "_posterior_interpolated.png",
-        samples=1000,
-        save_wandb=False,
-    )
-    print("Done.")
-
-
-if __name__ == "__main__":
-    names = [
-        "swi_vi_ours_amortized_calibrated_unregularized",  # ours
-        "swi_vi_amortized_uncalibrated_regularized_kl_beta_0.10",  # KL regularized
-        "swi_vi_amortized_uncalibrated_regularized_kl_beta_0.01",  # KL regularized
-        "swi_vi_amortized_uncalibrated_regularized_kl_beta_1.00",  # KL regularized
-    ]
-    for name in names:
-        eval(name)
+    elbos.append(-result[0])
+    logprobs.append(result[1])

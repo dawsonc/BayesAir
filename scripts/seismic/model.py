@@ -175,12 +175,14 @@ if __name__ == "__main__":
 
     # Plot the observations
     fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-    ax.plot(source_amplitudes[0, 0, :].cpu().numpy(), "k--", label="Source")
+    t = torch.arange(NT) * DT * 1000
+    ax.plot(t, source_amplitudes[0, 0, :].cpu().numpy(), "k--", label="Source")
     ax.plot([], "b-", label="Nominal ($\\times 10^7$))")
     ax.plot([], "r-", label="Anomaly ($\\times 10^7$)")
+    ax.set_xlabel("Time (ms)")
     ax.legend()
-    ax.plot(nominal_observations[:, 2, 4, :].cpu().numpy().T, "b-", linewidth=0.5)
-    ax.plot(failure_observations[:, 2, 4, :].cpu().numpy().T, "r-", linewidth=0.5)
+    ax.plot(t, nominal_observations[:, 2, 4, :].cpu().numpy().T, "b-", linewidth=0.5)
+    ax.plot(t, failure_observations[:, 2, 4, :].cpu().numpy().T, "r-", linewidth=0.5)
     plt.tight_layout()
     plt.savefig("paper_plots/swi/swi_observations.png", dpi=1000)
     plt.close()
