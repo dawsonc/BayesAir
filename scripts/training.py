@@ -6,13 +6,15 @@ import wandb
 
 
 def train(
-    nominal_model,
+    nominal_guide,
     n_nominal,
     nominal_observations,
-    failure_model,
+    failure_guide,
     n_failure,
     failure_observations,
-    elbo_fn,
+    n_failure_eval,
+    failure_observations_eval,
+    objective_fn,
     divergence_fn,
     plot_posterior,
     plot_posterior_grid,
@@ -31,19 +33,25 @@ def train(
     elbo_weight,
     wasserstein_regularization,
     calibration_num_permutations,
+    calibration_ub,
+    calibration_lr,
+    plot_every_n=10,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
 
     Args:
-        nominal_model: the nominal model. Should take no context
+        nominal_guide: the nominal model. Should take no context
         n_nominal: Number of nominal observations.
         nominal_observations: Observed data for the nominal case.
-        failure_model: the failure model. Should take context of length
+        failure_guide: the failure model. Should take context of length
             calibration_num_permutations
         n_failure: Number of failure observations.
         failure_observations: Observed data for the failure case.
-        elbo_fn: Function for computing the ELBO.
+        n_failure_eval: Number of failure observations for evaluation.
+        failure_observations_eval: Observed data for the failure case for evaluation.
+        objective_fn: Function for computing the inference objective (e.g. likelihood or
+            ELBO).
         divergence_fn: Function for computing the divergence.
         plot_posterior: Function for plotting the posterior.
         plot_posterior_grid: Function for plotting the posterior grid.
@@ -65,18 +73,21 @@ def train(
         wasserstein_regularization: if True, use Wasserstein for regularization rather
             than KL. Only compatible with CNF failure flows.
         calibration_num_permutations: number of permutations for calibration
+        calibration_ub: upper bound on calibration divergence
+        calibration_lr: learning rate for calibration
+        plot_every_n: number of steps between plotting
     """
     device = nominal_observations.device
 
     # Set up the optimizers
     nominal_optimizer = torch.optim.Adam(
-        nominal_model.parameters(), lr=lr, weight_decay=weight_decay
+        nominal_guide.parameters(), lr=lr, weight_decay=weight_decay
     )
     nominal_scheduler = torch.optim.lr_scheduler.StepLR(
         nominal_optimizer, step_size=lr_steps, gamma=lr_gamma
     )
     failure_optimizer = torch.optim.Adam(
-        failure_model.transform.parameters(),  # only transform in case base is a flow
+        failure_guide.transform.parameters(),  # only transform in case base is a flow
         lr=lr,
         weight_decay=weight_decay,
     )
@@ -94,11 +105,11 @@ def train(
     for i in pbar:
         # Optimize the nominal model
         nominal_optimizer.zero_grad()
-        nominal_elbo = elbo_fn(nominal_model(), n_nominal, nominal_observations)[0]
-        loss_nominal = nominal_elbo  # component[0] is ELBO loss, already negative
+        nominal_elbo = objective_fn(nominal_guide(), n_nominal, nominal_observations)
+        loss_nominal = nominal_elbo  # ELBO is returned as a loss, already negative
         loss_nominal.backward()
         nominal_grad_norm = torch.nn.utils.clip_grad_norm_(
-            nominal_model.parameters(), grad_clip
+            nominal_guide.parameters(), grad_clip
         )
         nominal_optimizer.step()
         nominal_scheduler.step()
@@ -114,21 +125,21 @@ def train(
             for j in range(calibration_num_permutations):
                 label = torch.zeros(calibration_num_permutations).to(device)
                 label[j] = 1.0
-                failure_elbo += elbo_fn(
-                    failure_model(label),
+                failure_elbo += objective_fn(
+                    failure_guide(label),
                     failure_permutations[j].shape[0],
                     failure_observations[failure_permutations[j]],
-                )[0]
+                )
 
             failure_elbo = failure_elbo / calibration_num_permutations
             failure_loss += elbo_weight * failure_elbo
         else:
             # If not calibrating, just get the ELBO on the failure observations
-            failure_elbo = elbo_fn(
-                failure_model(torch.ones(calibration_num_permutations).to(device)),
+            failure_elbo = objective_fn(
+                failure_guide(torch.ones(calibration_num_permutations).to(device)),
                 n_failure,
                 failure_observations,
-            )[0]
+            )
             failure_loss += elbo_weight * failure_elbo
 
         # The second part of the failure loss is divergence based.
@@ -144,91 +155,109 @@ def train(
             random_labels = torch.rand(
                 num_calibration_points, calibration_num_permutations
             )
-            samples = failure_model(random_labels).rsample((100,))
+            samples = failure_guide(random_labels).rsample((100,))
             kl_p_base = (
-                failure_model(random_labels).log_prob(samples)
-                - failure_model.base(random_labels).log_prob(samples)
+                failure_guide(random_labels).log_prob(samples)
+                - failure_guide.base(random_labels).log_prob(samples)
             ).mean(dim=0)
             kl_err = (
                 kl_p_base
-                - 100 * torch.norm(random_labels, dim=-1) / calibration_num_permutations
+                - calibration_ub
+                * torch.norm(random_labels, dim=-1)
+                / calibration_num_permutations
             )
             mean_calibration_error = torch.mean(kl_err**2)
             failure_loss += calibration_weight * mean_calibration_error
         elif regularize:
             if wasserstein_regularization:
                 # Get the square norm of the flow
-                ode_dim = failure_model.transform.ode[0].in_features
+                ode_dim = failure_guide.transform.ode[0].in_features
                 samples = torch.randn(100, ode_dim).to(device)
                 mean_square_flow = torch.mean(
-                    (failure_model.transform.ode(samples) ** 2).sum(dim=-1)
+                    (failure_guide.transform.ode(samples) ** 2).sum(dim=-1)
                 )
                 failure_loss += regularization_weight * mean_square_flow
             else:
                 # Get the KL divergence between the failure and nominal models
                 regularization_kl = divergence_fn(
-                    failure_model(torch.ones(calibration_num_permutations).to(device)),
-                    nominal_model(),
+                    failure_guide(torch.ones(calibration_num_permutations).to(device)),
+                    nominal_guide(),
                 )
                 failure_loss += regularization_weight * regularization_kl
 
         # Also make sure the failure distribution can represent the nominal
         # distribution with a zero label
-        failure_nominal_elbo = elbo_fn(
-            lambda: failure_model(torch.zeros(calibration_num_permutations).to(device)),
+        failure_nominal_elbo = objective_fn(
+            failure_guide(torch.zeros(calibration_num_permutations).to(device)),
             n_nominal,
             nominal_observations,
-        )[0]
+        )
         failure_loss += elbo_weight * failure_nominal_elbo
 
         # Optimimze the failure model
         failure_loss.backward()
         failure_grad_norm = torch.nn.utils.clip_grad_norm_(
-            failure_model.parameters(), grad_clip
+            failure_guide.parameters(), grad_clip
         )
         failure_optimizer.step()
         failure_scheduler.step()
 
         # Record progress
-        if i % 10 == 0 or i == num_steps - 1:
+        if i % plot_every_n == 0 or i == num_steps - 1:
             nominal_label = torch.zeros(calibration_num_permutations).to(device)
             failure_label = torch.ones(calibration_num_permutations).to(device)
+            calibrated_objective = None
             if calibrate:
                 failure_label = torch.zeros(
                     calibration_num_permutations, requires_grad=True
                 )
-                failure_label_optimizer = torch.optim.Adam([failure_label], lr=1e-3)
+                failure_label_optimizer = torch.optim.Adam(
+                    [failure_label], lr=calibration_lr
+                )
                 for j in range(1000):
                     failure_label_optimizer.zero_grad()
-                    failure_label_loss = elbo_fn(
-                        failure_model(failure_label),
+                    failure_label_loss = objective_fn(
+                        failure_guide(failure_label),
                         n_failure,
                         failure_observations,
-                    )[0]
+                    )
                     failure_label_loss.backward()
                     failure_label_optimizer.step()
 
-            plot_posterior(
-                nominal_model,
-                failure_model,
-                nominal_label,
-                failure_label,
-                save_file_name=name + "_posterior.png",
-            )
-            plot_posterior_grid(
-                nominal_model,
-                failure_model,
-                nominal_label,
-                save_file_name=name + "_posterior_grid.png",
-            )
+                calibrated_objective = failure_label_loss.detach().cpu().item()
+
+            with torch.no_grad():
+                # Evaluate the failure model
+                failure_objective_eval = objective_fn(
+                    failure_guide(failure_label),
+                    n_failure_eval,
+                    failure_observations_eval,
+                )
+
+                plot_posterior(
+                    nominal_guide(),
+                    failure_guide(failure_label),
+                    labels=["Nominal", "Failure (calibrated)"],
+                    save_file_name=None,
+                    save_wandb=True,
+                )
+
+                if calibrate:
+                    plot_posterior_grid(
+                        nominal_guide,
+                        failure_guide,
+                        nominal_label,
+                        save_file_name=None,
+                        save_wandb=True,
+                    )
 
             torch.save(
-                nominal_model.state_dict(),
+                nominal_guide.state_dict(),
                 f"checkpoints/{name}/nominal_checkpoint_{i}.pt",
             )
             torch.save(
                 {
-                    "failure_model": failure_model.state_dict(),
+                    "failure_guide": failure_guide.state_dict(),
                     "failure_label": failure_label,
                 },
                 f"checkpoints/{name}/failure_checkpoint_{i}.pt",
@@ -236,16 +265,17 @@ def train(
 
         wandb.log(
             {
-                "Nominal/ELBO": nominal_elbo.detatch().cpu().item(),
-                "Nominal/loss": loss_nominal.detatch().cpu().item(),
-                "Nominal/gradient norm": nominal_grad_norm.detatch().cpu().item(),
-                "Failure/ELBO": failure_elbo.detatch().cpu().item(),
-                "Failure/loss": failure_loss.detatch().cpu().item(),
-                "Failure/gradient norm": failure_grad_norm.detatch().cpu().item(),
+                "Nominal/ELBO": nominal_elbo.detach().cpu().item(),
+                "Nominal/loss": loss_nominal.detach().cpu().item(),
+                "Nominal/gradient norm": nominal_grad_norm.detach().cpu().item(),
+                "Failure/ELBO": failure_elbo.detach().cpu().item(),
+                "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
+                "Failure/loss": failure_loss.detach().cpu().item(),
+                "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
             }
             | (
                 {
-                    "Failure/mean calibration error": mean_calibration_error.detatch()
+                    "Failure/mean calibration error": mean_calibration_error.detach()
                     .cpu()
                     .item(),
                 }
@@ -253,8 +283,13 @@ def train(
                 else {}
             )
             | (
+                {"Failure/ELBO (calibrated)": calibrated_objective}
+                if calibrated_objective is not None
+                else {}
+            )
+            | (
                 {
-                    "Failure/regularization KL": regularization_kl.detatch()
+                    "Failure/regularization KL": regularization_kl.detach()
                     .cpu()
                     .item(),
                 }
@@ -263,14 +298,11 @@ def train(
             )
             | (
                 {
-                    "Failure/mean square flow": mean_square_flow.detatch().cpu().item(),
+                    "Failure/mean square flow": mean_square_flow.detach().cpu().item(),
                 }
                 if regularize and wasserstein_regularization
                 else {}
             )
         )
-        pbar.set_description(
-            f"Epoch {i} failure loss: {failure_loss.detatch().cpu().item():.3f}"
-        )
 
-    return nominal_model, failure_model, failure_label
+    return nominal_guide, failure_guide, failure_label
