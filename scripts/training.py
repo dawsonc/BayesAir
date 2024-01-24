@@ -3,6 +3,7 @@ import torch
 from tqdm import tqdm
 
 import wandb
+from scripts.utils import cross_entropy, simple_mmd, sinkhorn
 
 
 def train(
@@ -155,14 +156,18 @@ def train(
             random_labels = torch.rand(
                 num_calibration_points, calibration_num_permutations
             )
+            random_labels = torch.vstack(
+                (random_labels, torch.ones(1, calibration_num_permutations))
+            )
             samples = failure_guide(random_labels).rsample((100,))
             kl_p_base = (
                 failure_guide(random_labels).log_prob(samples)
                 - failure_guide.base(random_labels).log_prob(samples)
             ).mean(dim=0)
+            max_kl = torch.maximum(torch.tensor(1.0), kl_p_base[-1].detach())
             kl_err = (
-                kl_p_base
-                - calibration_ub
+                kl_p_base / max_kl
+                - 1  # calibration_ub
                 * torch.norm(random_labels, dim=-1)
                 / calibration_num_permutations
             )
@@ -234,6 +239,15 @@ def train(
                     failure_observations_eval,
                 )
 
+                # Compare the failure model to the eval data via a couple of metrics
+                n_eval = failure_observations_eval.shape[0]
+                p_samples_eval = failure_guide(failure_label).sample((n_eval,))
+                sinkhorn_dist = sinkhorn(p_samples_eval, failure_observations_eval)
+                mmd = simple_mmd(p_samples_eval, failure_observations_eval)
+                ce = cross_entropy(
+                    failure_observations_eval, failure_guide(failure_label)
+                )
+
                 plot_posterior(
                     nominal_guide(),
                     failure_guide(failure_label),
@@ -270,6 +284,9 @@ def train(
                 "Nominal/gradient norm": nominal_grad_norm.detach().cpu().item(),
                 "Failure/ELBO": failure_elbo.detach().cpu().item(),
                 "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
+                "Failure/Sinkhorn (eval)": sinkhorn_dist,
+                "Failure/MMD (eval)": mmd,
+                "Failure/CE (eval)": ce,
                 "Failure/loss": failure_loss.detach().cpu().item(),
                 "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
             }

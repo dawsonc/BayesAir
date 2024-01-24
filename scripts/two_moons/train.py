@@ -1,6 +1,7 @@
 """Implement CalVI training for the two moons toy problem."""
 import os
 
+import matplotlib
 import matplotlib.pyplot as plt
 import pyro
 import torch
@@ -21,11 +22,11 @@ from scripts.utils import ContextFreeBase, kl_divergence
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=600, type=int, help="# of steps")
+@option("--n-steps", default=1000, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
-@option("--grad-clip", default=float("inf"), type=float, help="Gradient clipping value")
+@option("--grad-clip", default=100, type=float, help="Gradient clipping value")
 @option("--weight-decay", default=0.0, type=float, help="Weight decay rate")
 @option("--run-prefix", default="", help="Prefix for run name")
 @option(
@@ -36,7 +37,7 @@ from scripts.utils import ContextFreeBase, kl_divergence
 )
 @option(
     "--n-calibration-particles",
-    default=10,
+    default=50,
     type=int,
     help="# of particles for calibration",
 )
@@ -66,9 +67,9 @@ from scripts.utils import ContextFreeBase, kl_divergence
 )
 @option("--elbo-weight", default=1e0, type=float, help="weight applied to ELBO loss")
 @option(
-    "--calibration_ub", default=5e1, type=float, help="KL upper bound for calibration"
+    "--calibration-ub", default=5e1, type=float, help="KL upper bound for calibration"
 )
-@option("--calibration_lr", default=1e-3, type=float, help="LR for calibration")
+@option("--calibration-lr", default=1e-3, type=float, help="LR for calibration")
 def run(
     n_nominal,
     n_failure,
@@ -95,7 +96,7 @@ def run(
     calibration_lr,
 ):
     """Generate data and train the SWI model."""
-    # matplotlib.use("Agg")  # TODO enable
+    matplotlib.use("Agg")
 
     # Parse arguments
     calibrate = not no_calibrate
@@ -297,7 +298,7 @@ def run(
         calibration_num_permutations=n_calibration_permutations,
         calibration_ub=calibration_ub,
         calibration_lr=calibration_lr,
-        plot_every_n=50,
+        plot_every_n=n_steps,
     )
 
 
