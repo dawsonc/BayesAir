@@ -16,13 +16,13 @@ from scripts.utils import kl_divergence
 
 @command()
 @option("--n-nominal", default=100, help="# of nominal examples")
-@option("--n-failure", default=3, help="# of failure examples for training")
+@option("--n-failure", default=4, help="# of failure examples for training")
 @option("--n-failure-eval", default=100, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=1000, type=int, help="# of steps")
+@option("--n-steps", default=100, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
@@ -70,6 +70,7 @@ from scripts.utils import kl_divergence
     "--calibration-ub", default=5e1, type=float, help="KL upper bound for calibration"
 )
 @option("--calibration-lr", default=1e-3, type=float, help="LR for calibration")
+@option("--calibration-substeps", default=1, type=int, help="# of calibration substeps")
 def run(
     n_nominal,
     n_failure,
@@ -94,6 +95,7 @@ def run(
     elbo_weight,
     calibration_ub,
     calibration_lr,
+    calibration_substeps,
 ):
     """Generate data and train the SWI model."""
     matplotlib.use("Agg")
@@ -113,11 +115,11 @@ def run(
         # Nominal has a layer of higher vp, vs, and rho in the middle
         profile_nominal = profile_background.expand(n_nominal, -1, -1).clone()
         profile_nominal[:, 3:6, 1:9] = 1.0
-        fracture_variation = 0.5 * torch.randn(n_nominal).to(device).reshape(-1, 1, 1)
-        profile_nominal[:, 3:6, 4:6] += fracture_variation
-        profile_nominal[:, 3:4, 6:10] += fracture_variation
-        profile_nominal[:, 3:6, :1] -= fracture_variation
-        profile_nominal[:, 4:7, 9:] -= fracture_variation
+        # fracture_variation = 0.5 * torch.randn(n_nominal).to(device).reshape(-1, 1, 1)
+        # profile_nominal[:, 3:6, 4:6] += fracture_variation
+        # profile_nominal[:, 3:4, 6:10] += fracture_variation
+        # profile_nominal[:, 3:6, :1] -= fracture_variation
+        # profile_nominal[:, 4:7, 9:] -= fracture_variation
         profile_nominal += 0.3 * torch.randn_like(profile_nominal)
 
         # Failure has a break in the middle of the layer
@@ -205,7 +207,7 @@ def run(
     # Define plotting callbacks
     @torch.no_grad()
     def plot_posterior(*dists, labels=None, save_file_name=None, save_wandb=False):
-        fig, axs = plt.subplots(len(dists), 1, figsize=(4, 8 * len(dists)))
+        fig, axs = plt.subplots(len(dists), 1, figsize=(4, 4 * len(dists)))
 
         for i, dist in enumerate(dists):
             sample_mean = dist.sample((100,)).mean(dim=0).cpu().numpy()
@@ -228,7 +230,6 @@ def run(
 
     @torch.no_grad()
     def plot_posterior_grid(
-        nominal_guide,
         failure_guide,
         nominal_label,
         save_file_name=None,
@@ -237,8 +238,8 @@ def run(
         n_steps = 5
         fig, axs = plt.subplots(
             n_steps,
-            1 + n_calibration_permutations,
-            figsize=(5 * (1 + n_calibration_permutations), 5 * n_steps),
+            n_calibration_permutations,
+            figsize=(5 * n_calibration_permutations, 5 * n_steps),
         )
 
         for row, j in enumerate(torch.linspace(0, 1, n_steps)):
@@ -252,12 +253,6 @@ def run(
 
                 axs[row, i].imshow(sample_mean, cmap="Blues")
 
-            i = -1
-            sample_mean = (
-                failure_guide(nominal_label).sample((100,)).mean(dim=0).cpu().numpy()
-            )
-            axs[row, i].imshow(sample_mean, cmap="Blues")
-
         if save_file_name:
             plt.savefig(save_file_name, bbox_inches="tight")
 
@@ -269,9 +264,9 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
-    run_name += "calibrated_" if calibrate else "uncalibrated_"
+    run_name += "calibrated_" if calibrate else ""
     if regularize:
-        run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
+        run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
         project="swi",
         name=run_name,
@@ -299,11 +294,12 @@ def run(
             "elbo_weight": elbo_weight,
             "calibration_ub": calibration_ub,
             "calibration_lr": calibration_lr,
+            "calibration_substeps": calibration_substeps,
         },
     )
 
     # Make a directory for checkpoints if it doesn't already exist
-    os.makedirs(f"checkpoints/two_moons/{run_name}", exist_ok=True)
+    os.makedirs(f"checkpoints/swi/{run_name}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:
@@ -328,7 +324,7 @@ def run(
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,
         plot_posterior_grid=plot_posterior_grid,
-        name="two_moons/" + run_name,
+        name="swi/" + run_name,
         calibrate=calibrate,
         regularize=regularize,
         num_steps=n_steps,
@@ -345,6 +341,7 @@ def run(
         calibration_num_permutations=n_calibration_permutations,
         calibration_ub=calibration_ub,
         calibration_lr=calibration_lr,
+        calibration_substeps=calibration_substeps,
         plot_every_n=n_steps,
     )
 

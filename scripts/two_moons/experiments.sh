@@ -1,21 +1,16 @@
 # Run experiments for the two moons dataset
 
 for seed in 0 1 2 3; do
-# for seed in 0; do
-    # Our approach; confirmed working
+    # Our approach
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed
 
-    # Baseline: beta-NF (KL-regularized normalizing flow); not tested
-    # Needs testing with a range of weights for the KL normalization
+    # Baseline: KL-regularized normalizing flow)
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --no-calibrate --regularize --regularization-weight 1.0
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --no-calibrate --regularize --regularization-weight 0.1
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --no-calibrate --regularize --regularization-weight 0.01
-    # TODO: add a run with optimal KL regularization weight determined via manual tuning
 
-    # Baseline: W2-regularized normalizing flow (RNODE); not tested
-    # Needs testing with a range of weights for the W2 regularization
+    # Baseline: W2-regularized normalizing flow (RNODE)
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 1.0
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.1
     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.01
-    # TODO: add a run with optimal W2 regularization weight determined via manual tuning
 done

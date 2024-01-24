@@ -3,7 +3,7 @@ import torch
 from tqdm import tqdm
 
 import wandb
-from scripts.utils import cross_entropy, simple_mmd
+from scripts.utils import cross_entropy, f_score, simple_mmd
 
 
 def train(
@@ -82,7 +82,7 @@ def train(
 
     # Set up the optimizers
     failure_optimizer = torch.optim.Adam(
-        failure_guide.transform.parameters(),  # only transform in case base is a flow
+        failure_guide.parameters(),
         lr=lr,
         weight_decay=weight_decay,
     )
@@ -152,26 +152,6 @@ def train(
         #   - not calibrating, regularizing with Wasserstein: penalize the square norm
         #     of the failure model's ode flow (only works for CNF)
         if calibrate:
-            # random_labels = torch.rand(
-            #     num_calibration_points, calibration_num_permutations
-            # )
-            # random_labels = torch.vstack(
-            #     (random_labels, torch.ones(1, calibration_num_permutations))
-            # )
-            # samples = failure_guide(random_labels).rsample((100,))
-            # kl_p_base = (
-            #     failure_guide(random_labels).log_prob(samples)
-            #     - failure_guide.base(random_labels).log_prob(samples)
-            # ).mean(dim=0)
-            # # max_kl = torch.maximum(torch.tensor(1.0), kl_p_base[-1].detach())
-            # kl_err = (
-            #     kl_p_base
-            #     - calibration_ub
-            #     * torch.norm(random_labels, dim=-1)
-            #     / calibration_num_permutations
-            # )
-            # mean_calibration_error = torch.mean(kl_err**2)
-            # failure_loss += calibration_weight * mean_calibration_error
             mixture_label_loss = objective_fn(
                 failure_guide(mixture_label), n_failure, failure_observations
             )
@@ -211,11 +191,12 @@ def train(
         failure_scheduler.step()
 
         # Evaluate the failure model
-        failure_objective_eval = objective_fn(
-            failure_guide(mixture_label),
-            n_failure_eval,
-            failure_observations_eval,
-        )
+        with torch.no_grad():
+            failure_objective_eval = objective_fn(
+                failure_guide(mixture_label),
+                n_failure_eval,
+                failure_observations_eval,
+            )
 
         # Record progress
         if i % plot_every_n == 0 or i == num_steps - 1:
@@ -234,7 +215,11 @@ def train(
             with torch.no_grad():
                 plot_posterior(
                     failure_guide(torch.zeros(calibration_num_permutations).to(device)),
-                    failure_guide(mixture_label),
+                    failure_guide(mixture_label)
+                    if calibrate
+                    else failure_guide(
+                        torch.ones(calibration_num_permutations).to(device)
+                    ),
                     labels=["Nominal", "Failure (calibrated)"],
                     save_file_name=None,
                     save_wandb=True,
@@ -257,11 +242,26 @@ def train(
 
         # Compare the failure model to the eval data via a couple of metrics
         with torch.no_grad():
+            nominal_dist = failure_guide(
+                torch.zeros(calibration_num_permutations).to(device)
+            )
+            if calibrate:
+                failure_dist = failure_guide(mixture_label)
+            else:
+                failure_dist = failure_guide(
+                    torch.ones(calibration_num_permutations).to(device)
+                )
+
             n_eval = failure_observations_eval.shape[0]
-            p_samples_eval = failure_guide(mixture_label).sample((n_eval,))
-            # sinkhorn_dist = sinkhorn(p_samples_eval, failure_observations_eval)
+            p_samples_eval = failure_dist.sample((n_eval,))
             mmd = simple_mmd(p_samples_eval, failure_observations_eval)
-            ce = cross_entropy(failure_observations_eval, failure_guide(mixture_label))
+            f_score_eval = f_score(
+                nominal_observations,
+                failure_observations_eval,
+                nominal_dist,
+                failure_dist,
+            )
+            ce = cross_entropy(failure_observations_eval, failure_dist)
 
         wandb.log(
             {
@@ -269,6 +269,7 @@ def train(
                 "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
                 # "Failure/Sinkhorn (eval)": sinkhorn_dist,
                 "Failure/MMD (eval)": mmd,
+                "Failure/F score (eval)": f_score_eval,
                 "Failure/CE (eval)": ce,
                 "Failure/loss": failure_loss.detach().cpu().item(),
                 "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),

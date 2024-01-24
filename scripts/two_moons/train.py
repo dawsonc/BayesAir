@@ -212,7 +212,7 @@ def run(
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
     wandb.init(
-        project="two-moons-2",
+        project="two-moons-3",
         name=run_name,
         group=run_name,
         config={
@@ -288,6 +288,8 @@ def run(
         calibration_substeps=calibration_substeps,
         plot_every_n=n_steps,
     )
+
+    wandb.finish()
 
 
 if __name__ == "__main__":

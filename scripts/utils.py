@@ -2,6 +2,7 @@
 import numpy as np
 import ot
 import torch
+from torchmetrics.classification import BinaryF1Score
 
 
 def kl_divergence(p_dist, q_dist, num_particles=10):
@@ -21,6 +22,28 @@ def cross_entropy(p_samples, q_dist):
     cross_entropy = -q_logprobs.mean(dim=0)
 
     return cross_entropy
+
+
+def f_score(nominal_samples, failure_samples, nominal_dist, failure_dist):
+    """Compute the f score of a likelihood ratio test for failure."""
+    # Concatenate the samples
+    samples = torch.cat([nominal_samples, failure_samples], dim=0)
+    true_labels = torch.cat(
+        [
+            torch.zeros(nominal_samples.shape[0]),
+            torch.ones(failure_samples.shape[0]),
+        ],
+        dim=0,
+    )
+
+    # Compute the likelihood ratio and classify as a failure if is >= 1 (more likely
+    # to be from the failure distribution than the nominal distribution)
+    likelihood_ratio = failure_dist.log_prob(samples) - nominal_dist.log_prob(samples)
+    predicted_labels = (likelihood_ratio >= 0).float()
+
+    # Get the f score
+    f_score = BinaryF1Score()(predicted_labels, true_labels)
+    return f_score
 
 
 def sinkhorn(p_samples, q_samples, epsilon=1.0):
