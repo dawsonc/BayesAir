@@ -69,7 +69,7 @@ from scripts.utils import ContextFreeBase, kl_divergence
 @option(
     "--calibration-ub", default=5e1, type=float, help="KL upper bound for calibration"
 )
-@option("--calibration-lr", default=1e-3, type=float, help="LR for calibration")
+@option("--calibration-lr", default=1e-2, type=float, help="LR for calibration")
 def run(
     n_nominal,
     n_failure,
@@ -101,10 +101,10 @@ def run(
     # Parse arguments
     calibrate = not no_calibrate
 
-    # Generate data
+    # Generate data (use consistent seed for all runs to make data)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.manual_seed(seed)
-    pyro.set_rng_seed(seed)
+    torch.manual_seed(0)
+    pyro.set_rng_seed(0)
 
     # Generate training data
     with torch.no_grad():
@@ -117,6 +117,10 @@ def run(
         failure_samples_eval = generate_two_moons_data(
             n_failure_eval, device, failure=True
         ).cpu()
+
+    # Change seed for training
+    torch.manual_seed(seed)
+    pyro.set_rng_seed(seed)
 
     # Make the objective and divergence closures
     def objective_fn(guide_dist, n, obs):

@@ -164,10 +164,10 @@ def train(
                 failure_guide(random_labels).log_prob(samples)
                 - failure_guide.base(random_labels).log_prob(samples)
             ).mean(dim=0)
-            max_kl = torch.maximum(torch.tensor(1.0), kl_p_base[-1].detach())
+            # max_kl = torch.maximum(torch.tensor(1.0), kl_p_base[-1].detach())
             kl_err = (
-                kl_p_base / max_kl
-                - 1  # calibration_ub
+                kl_p_base
+                - calibration_ub
                 * torch.norm(random_labels, dim=-1)
                 / calibration_num_permutations
             )
