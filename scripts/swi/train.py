@@ -11,7 +11,7 @@ from click import command, option
 import wandb
 from scripts.swi.model import NX_COARSE, NY_COARSE, seismic_model
 from scripts.training import train
-from scripts.utils import ContextFreeBase, kl_divergence
+from scripts.utils import kl_divergence
 
 
 @command()
@@ -306,12 +306,10 @@ def run(
     os.makedirs(f"checkpoints/two_moons/{run_name}", exist_ok=True)
 
     # Initialize the models
-    nominal_guide = zuko.flows.NSF(features=2, hidden_features=(64, 64))
     if wasserstein:
         failure_guide = zuko.flows.CNF(
             features=2, context=n_calibration_permutations, hidden_features=(64, 64)
         )
-        failure_guide.base = ContextFreeBase(nominal_guide)
     else:
         failure_guide = zuko.flows.NSF(
             features=2, context=n_calibration_permutations, hidden_features=(64, 64)
@@ -319,7 +317,6 @@ def run(
 
     # Train the model
     train(
-        nominal_guide=nominal_guide,
         n_nominal=n_nominal,
         nominal_observations=nominal_observations,
         failure_guide=failure_guide,

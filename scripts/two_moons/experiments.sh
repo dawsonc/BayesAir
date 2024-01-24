@@ -1,9 +1,9 @@
 # Run experiments for the two moons dataset
 
-# for seed in 0 1 2 3; do
-for seed in 1 2 3; do
+for seed in 0 1 2 3; do
+# for seed in 0; do
     # Our approach; confirmed working
-    CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed --calibration-lr 1e-2
+    CUDA_VISIBLE_DEVICES=0, poetry run python scripts/two_moons/train.py --seed $seed
 
     # Baseline: beta-NF (KL-regularized normalizing flow); not tested
     # Needs testing with a range of weights for the KL normalization

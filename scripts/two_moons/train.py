@@ -11,7 +11,7 @@ from click import command, option
 import wandb
 from scripts.training import train
 from scripts.two_moons.model import generate_two_moons_data
-from scripts.utils import ContextFreeBase, kl_divergence
+from scripts.utils import kl_divergence
 
 
 @command()
@@ -22,7 +22,7 @@ from scripts.utils import ContextFreeBase, kl_divergence
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=1000, type=int, help="# of steps")
+@option("--n-steps", default=200, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
@@ -69,7 +69,8 @@ from scripts.utils import ContextFreeBase, kl_divergence
 @option(
     "--calibration-ub", default=5e1, type=float, help="KL upper bound for calibration"
 )
-@option("--calibration-lr", default=1e-2, type=float, help="LR for calibration")
+@option("--calibration-lr", default=1e-3, type=float, help="LR for calibration")
+@option("--calibration-substeps", default=1, type=int, help="# of calibration substeps")
 def run(
     n_nominal,
     n_failure,
@@ -94,6 +95,7 @@ def run(
     elbo_weight,
     calibration_ub,
     calibration_lr,
+    calibration_substeps,
 ):
     """Generate data and train the SWI model."""
     matplotlib.use("Agg")
@@ -163,7 +165,6 @@ def run(
 
     @torch.no_grad()
     def plot_posterior_grid(
-        nominal_guide,
         failure_guide,
         nominal_label,
         save_file_name=None,
@@ -172,8 +173,8 @@ def run(
         n_steps = 5
         fig, axs = plt.subplots(
             n_steps,
-            1 + n_calibration_permutations,
-            figsize=(5 * (1 + n_calibration_permutations), 5 * n_steps),
+            n_calibration_permutations,
+            figsize=(5 * n_calibration_permutations, 5 * n_steps),
         )
 
         for row, j in enumerate(torch.linspace(0, 1, n_steps)):
@@ -181,7 +182,7 @@ def run(
                 label = torch.zeros(n_calibration_permutations)
                 label[i] = j
 
-                nominal_samples = nominal_guide().sample((1_000,))
+                nominal_samples = failure_guide(nominal_label).sample((1_000,))
                 nominal_labels = torch.tensor([0.0]).expand(1_000)
                 failure_samples = failure_guide(label).sample((1_000,))
                 failure_labels = torch.tensor([1.0]).expand(1_000)
@@ -195,22 +196,6 @@ def run(
                 axs[row, i].set_ylim([-1.1, 1.1])
                 axs[row, i].set_xlim([-1.7, 1.7])
                 axs[row, i].set_aspect("equal")
-
-            i = -1
-            nominal_samples = nominal_guide().sample((1_000,))
-            nominal_labels = torch.tensor([0.0]).expand(1_000)
-            failure_samples = failure_guide(nominal_label).sample((1_000,))
-            failure_labels = torch.tensor([1.0]).expand(1_000)
-
-            samples = torch.cat((nominal_samples, failure_samples), axis=0)
-            labels = torch.cat((nominal_labels, failure_labels), axis=0)
-            axs[row, i].scatter(*samples.T, s=1, c=labels, cmap="bwr")
-            axs[row, i].set_xticks([])
-            axs[row, i].set_yticks([])
-            axs[row, i].axis("off")
-            axs[row, i].set_ylim([-1.1, 1.1])
-            axs[row, i].set_xlim([-1.7, 1.7])
-            axs[row, i].set_aspect("equal")
 
         if save_file_name:
             plt.savefig(save_file_name, bbox_inches="tight")
@@ -227,7 +212,7 @@ def run(
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
     wandb.init(
-        project="two-moons",
+        project="two-moons-2",
         name=run_name,
         group=run_name,
         config={
@@ -253,6 +238,7 @@ def run(
             "elbo_weight": elbo_weight,
             "calibration_ub": calibration_ub,
             "calibration_lr": calibration_lr,
+            "calibration_substeps": calibration_substeps,
         },
     )
 
@@ -260,12 +246,10 @@ def run(
     os.makedirs(f"checkpoints/two_moons/{run_name}", exist_ok=True)
 
     # Initialize the models
-    nominal_guide = zuko.flows.NSF(features=2, hidden_features=(64, 64))
     if wasserstein:
         failure_guide = zuko.flows.CNF(
-            features=2, context=n_calibration_permutations, hidden_features=(64, 64)
+            features=2, context=n_calibration_permutations, hidden_features=(128, 128)
         )
-        failure_guide.base = ContextFreeBase(nominal_guide)
     else:
         failure_guide = zuko.flows.NSF(
             features=2, context=n_calibration_permutations, hidden_features=(64, 64)
@@ -273,7 +257,6 @@ def run(
 
     # Train the model
     train(
-        nominal_guide=nominal_guide,
         n_nominal=n_nominal,
         nominal_observations=nominal_samples,
         failure_guide=failure_guide,
@@ -302,6 +285,7 @@ def run(
         calibration_num_permutations=n_calibration_permutations,
         calibration_ub=calibration_ub,
         calibration_lr=calibration_lr,
+        calibration_substeps=calibration_substeps,
         plot_every_n=n_steps,
     )
 

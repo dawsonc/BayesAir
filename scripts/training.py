@@ -3,11 +3,10 @@ import torch
 from tqdm import tqdm
 
 import wandb
-from scripts.utils import cross_entropy, simple_mmd, sinkhorn
+from scripts.utils import cross_entropy, simple_mmd
 
 
 def train(
-    nominal_guide,
     n_nominal,
     nominal_observations,
     failure_guide,
@@ -36,13 +35,13 @@ def train(
     calibration_num_permutations,
     calibration_ub,
     calibration_lr,
+    calibration_substeps,
     plot_every_n=10,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
 
     Args:
-        nominal_guide: the nominal model. Should take no context
         n_nominal: Number of nominal observations.
         nominal_observations: Observed data for the nominal case.
         failure_guide: the failure model. Should take context of length
@@ -76,17 +75,12 @@ def train(
         calibration_num_permutations: number of permutations for calibration
         calibration_ub: upper bound on calibration divergence
         calibration_lr: learning rate for calibration
+        calibration_substeps: number of calibration steps to take per training step
         plot_every_n: number of steps between plotting
     """
     device = nominal_observations.device
 
     # Set up the optimizers
-    nominal_optimizer = torch.optim.Adam(
-        nominal_guide.parameters(), lr=lr, weight_decay=weight_decay
-    )
-    nominal_scheduler = torch.optim.lr_scheduler.StepLR(
-        nominal_optimizer, step_size=lr_steps, gamma=lr_gamma
-    )
     failure_optimizer = torch.optim.Adam(
         failure_guide.transform.parameters(),  # only transform in case base is a flow
         lr=lr,
@@ -95,6 +89,10 @@ def train(
     failure_scheduler = torch.optim.lr_scheduler.StepLR(
         failure_optimizer, step_size=lr_steps, gamma=lr_gamma
     )
+    mixture_label = torch.zeros(calibration_num_permutations, requires_grad=True).to(
+        device
+    )
+    mixture_label_optimizer = torch.optim.Adam([mixture_label], lr=calibration_lr)
 
     # Create the permutations for training the calibrated model
     failure_permutations = []
@@ -104,16 +102,18 @@ def train(
     # Train the model
     pbar = tqdm(range(num_steps))
     for i in pbar:
-        # Optimize the nominal model
-        nominal_optimizer.zero_grad()
-        nominal_elbo = objective_fn(nominal_guide(), n_nominal, nominal_observations)
-        loss_nominal = nominal_elbo  # ELBO is returned as a loss, already negative
-        loss_nominal.backward()
-        nominal_grad_norm = torch.nn.utils.clip_grad_norm_(
-            nominal_guide.parameters(), grad_clip
-        )
-        nominal_optimizer.step()
-        nominal_scheduler.step()
+        # Train the mixture label
+        if calibrate:
+            for _ in range(calibration_substeps):
+                mixture_label_optimizer.zero_grad()
+                mixture_label_loss = objective_fn(
+                    failure_guide(mixture_label), n_failure, failure_observations
+                )
+                mixture_label_loss.backward()
+                mixture_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    mixture_label, grad_clip
+                )
+                mixture_label_optimizer.step()
 
         # Optimize the failure model
         failure_optimizer.zero_grad()
@@ -143,36 +143,39 @@ def train(
             )
             failure_loss += elbo_weight * failure_elbo
 
-        # The second part of the failure loss is divergence based.
+        # The second part of the failure loss is regularization/calibration
         # There are three cases:
-        #   - calibrating (ours): get the KL divergence between the failure model and
-        #     its base at some randomly sampled labels, then make the KL divergence
-        #     roughly match the norm of those labels
+        #   - calibrating (ours): Get the performance of the calibrated label on the
+        #     training set
         #   - not calibrating, regularizing with KL: get the KL divergence between the
         #     failure model and the nominal model
         #   - not calibrating, regularizing with Wasserstein: penalize the square norm
         #     of the failure model's ode flow (only works for CNF)
         if calibrate:
-            random_labels = torch.rand(
-                num_calibration_points, calibration_num_permutations
+            # random_labels = torch.rand(
+            #     num_calibration_points, calibration_num_permutations
+            # )
+            # random_labels = torch.vstack(
+            #     (random_labels, torch.ones(1, calibration_num_permutations))
+            # )
+            # samples = failure_guide(random_labels).rsample((100,))
+            # kl_p_base = (
+            #     failure_guide(random_labels).log_prob(samples)
+            #     - failure_guide.base(random_labels).log_prob(samples)
+            # ).mean(dim=0)
+            # # max_kl = torch.maximum(torch.tensor(1.0), kl_p_base[-1].detach())
+            # kl_err = (
+            #     kl_p_base
+            #     - calibration_ub
+            #     * torch.norm(random_labels, dim=-1)
+            #     / calibration_num_permutations
+            # )
+            # mean_calibration_error = torch.mean(kl_err**2)
+            # failure_loss += calibration_weight * mean_calibration_error
+            mixture_label_loss = objective_fn(
+                failure_guide(mixture_label), n_failure, failure_observations
             )
-            random_labels = torch.vstack(
-                (random_labels, torch.ones(1, calibration_num_permutations))
-            )
-            samples = failure_guide(random_labels).rsample((100,))
-            kl_p_base = (
-                failure_guide(random_labels).log_prob(samples)
-                - failure_guide.base(random_labels).log_prob(samples)
-            ).mean(dim=0)
-            # max_kl = torch.maximum(torch.tensor(1.0), kl_p_base[-1].detach())
-            kl_err = (
-                kl_p_base
-                - calibration_ub
-                * torch.norm(random_labels, dim=-1)
-                / calibration_num_permutations
-            )
-            mean_calibration_error = torch.mean(kl_err**2)
-            failure_loss += calibration_weight * mean_calibration_error
+            failure_loss += calibration_weight * mixture_label_loss
         elif regularize:
             if wasserstein_regularization:
                 # Get the square norm of the flow
@@ -186,7 +189,7 @@ def train(
                 # Get the KL divergence between the failure and nominal models
                 regularization_kl = divergence_fn(
                     failure_guide(torch.ones(calibration_num_permutations).to(device)),
-                    nominal_guide(),
+                    failure_guide(torch.zeros(calibration_num_permutations).to(device)),
                 )
                 failure_loss += regularization_weight * regularization_kl
 
@@ -207,101 +210,88 @@ def train(
         failure_optimizer.step()
         failure_scheduler.step()
 
+        # Evaluate the failure model
+        failure_objective_eval = objective_fn(
+            failure_guide(mixture_label),
+            n_failure_eval,
+            failure_observations_eval,
+        )
+
         # Record progress
         if i % plot_every_n == 0 or i == num_steps - 1:
-            nominal_label = torch.zeros(calibration_num_permutations).to(device)
-            failure_label = torch.ones(calibration_num_permutations).to(device)
-            calibrated_objective = None
             if calibrate:
-                failure_label = torch.zeros(
-                    calibration_num_permutations, requires_grad=True
-                )
-                failure_label_optimizer = torch.optim.Adam(
-                    [failure_label], lr=calibration_lr
-                )
-                for j in range(1000):
-                    failure_label_optimizer.zero_grad()
-                    failure_label_loss = objective_fn(
-                        failure_guide(failure_label),
-                        n_failure,
-                        failure_observations,
+                for _ in range(200):
+                    mixture_label_optimizer.zero_grad()
+                    mixture_label_loss = objective_fn(
+                        failure_guide(mixture_label), n_failure, failure_observations
                     )
-                    failure_label_loss.backward()
-                    failure_label_optimizer.step()
-
-                calibrated_objective = failure_label_loss.detach().cpu().item()
+                    mixture_label_loss.backward()
+                    mixture_grad_norm = torch.nn.utils.clip_grad_norm_(
+                        mixture_label, grad_clip
+                    )
+                    mixture_label_optimizer.step()
 
             with torch.no_grad():
-                # Evaluate the failure model
-                failure_objective_eval = objective_fn(
-                    failure_guide(failure_label),
-                    n_failure_eval,
-                    failure_observations_eval,
-                )
-
-                # Compare the failure model to the eval data via a couple of metrics
-                n_eval = failure_observations_eval.shape[0]
-                p_samples_eval = failure_guide(failure_label).sample((n_eval,))
-                sinkhorn_dist = sinkhorn(p_samples_eval, failure_observations_eval)
-                mmd = simple_mmd(p_samples_eval, failure_observations_eval)
-                ce = cross_entropy(
-                    failure_observations_eval, failure_guide(failure_label)
-                )
-
                 plot_posterior(
-                    nominal_guide(),
-                    failure_guide(failure_label),
+                    failure_guide(torch.zeros(calibration_num_permutations).to(device)),
+                    failure_guide(mixture_label),
                     labels=["Nominal", "Failure (calibrated)"],
                     save_file_name=None,
                     save_wandb=True,
                 )
 
-                if calibrate:
-                    plot_posterior_grid(
-                        nominal_guide,
-                        failure_guide,
-                        nominal_label,
-                        save_file_name=None,
-                        save_wandb=True,
-                    )
+                plot_posterior_grid(
+                    failure_guide,
+                    torch.zeros(calibration_num_permutations).to(device),
+                    save_file_name=None,
+                    save_wandb=True,
+                )
 
-            torch.save(
-                nominal_guide.state_dict(),
-                f"checkpoints/{name}/nominal_checkpoint_{i}.pt",
-            )
             torch.save(
                 {
                     "failure_guide": failure_guide.state_dict(),
-                    "failure_label": failure_label,
+                    "mixture_label": mixture_label,
                 },
                 f"checkpoints/{name}/failure_checkpoint_{i}.pt",
             )
 
+        # Compare the failure model to the eval data via a couple of metrics
+        with torch.no_grad():
+            n_eval = failure_observations_eval.shape[0]
+            p_samples_eval = failure_guide(mixture_label).sample((n_eval,))
+            # sinkhorn_dist = sinkhorn(p_samples_eval, failure_observations_eval)
+            mmd = simple_mmd(p_samples_eval, failure_observations_eval)
+            ce = cross_entropy(failure_observations_eval, failure_guide(mixture_label))
+
         wandb.log(
             {
-                "Nominal/ELBO": nominal_elbo.detach().cpu().item(),
-                "Nominal/loss": loss_nominal.detach().cpu().item(),
-                "Nominal/gradient norm": nominal_grad_norm.detach().cpu().item(),
                 "Failure/ELBO": failure_elbo.detach().cpu().item(),
                 "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
-                "Failure/Sinkhorn (eval)": sinkhorn_dist,
+                # "Failure/Sinkhorn (eval)": sinkhorn_dist,
                 "Failure/MMD (eval)": mmd,
                 "Failure/CE (eval)": ce,
                 "Failure/loss": failure_loss.detach().cpu().item(),
                 "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
             }
+            # | (
+            #     {
+            #         "Failure/mean calibration error": mean_calibration_error.detach()
+            #         .cpu()
+            #         .item(),
+            #     }
+            #     if calibrate
+            #     else {}
+            # )
             | (
                 {
-                    "Failure/mean calibration error": mean_calibration_error.detach()
+                    "Failure/ELBO (calibrated)": mixture_label_loss.detach()
+                    .cpu()
+                    .item(),
+                    "Failure/mixture grad norm": mixture_grad_norm.detach()
                     .cpu()
                     .item(),
                 }
                 if calibrate
-                else {}
-            )
-            | (
-                {"Failure/ELBO (calibrated)": calibrated_objective}
-                if calibrated_objective is not None
                 else {}
             )
             | (
@@ -322,4 +312,4 @@ def train(
             )
         )
 
-    return nominal_guide, failure_guide, failure_label
+    return failure_guide, mixture_label
