@@ -38,7 +38,9 @@ def train(
     calibration_ub,
     calibration_lr,
     calibration_substeps,
+    calibration_steps,
     plot_every_n=10,
+    device=None,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
@@ -82,9 +84,11 @@ def train(
         calibration_ub: upper bound on calibration divergence
         calibration_lr: learning rate for calibration
         calibration_substeps: number of calibration steps to take per training step
+        calibration_steps: number of calibration steps to take prior to evaluation
         plot_every_n: number of steps between plotting
     """
-    device = nominal_observations.device
+    if device is None:
+        device = nominal_observations.device
 
     # Set up the optimizers
     failure_optimizer = torch.optim.Adam(
@@ -132,10 +136,17 @@ def train(
             for j in range(calibration_num_permutations):
                 label = torch.zeros(calibration_num_permutations).to(device)
                 label[j] = 1.0
+                if isinstance(failure_observations, list):
+                    subsample = [
+                        failure_observations[k] for k in failure_permutations[j]
+                    ]
+                else:
+                    subsample = failure_observations[failure_permutations[j]]
+
                 failure_elbo += objective_fn(
                     failure_guide(label),
                     failure_permutations[j].shape[0],
-                    failure_observations[failure_permutations[j]],
+                    subsample,
                 )
 
             failure_elbo = failure_elbo / calibration_num_permutations
@@ -207,7 +218,7 @@ def train(
         # Record progress
         if i % plot_every_n == 0 or i == num_steps - 1:
             if calibrate:
-                for _ in range(200):
+                for _ in range(calibration_steps):
                     mixture_label_optimizer.zero_grad()
                     mixture_label_loss = objective_fn(
                         failure_guide(mixture_label), n_failure, failure_observations
@@ -258,25 +269,29 @@ def train(
                     torch.ones(calibration_num_permutations).to(device)
                 )
 
-            n_eval = failure_posterior_samples_eval.shape[0]
-            p_samples_eval = failure_dist.sample((n_eval,))
-            mmd = simple_mmd(p_samples_eval, failure_posterior_samples_eval)
-            f_score_eval = f_score(
-                nominal_posterior_samples_eval,
-                failure_posterior_samples_eval,
-                nominal_dist,
-                failure_dist,
-            )
-            ce = cross_entropy(failure_posterior_samples_eval, failure_dist)
+            if failure_posterior_samples_eval:
+                n_eval = failure_posterior_samples_eval.shape[0]
+                p_samples_eval = failure_dist.sample((n_eval,))
+                mmd = simple_mmd(p_samples_eval, failure_posterior_samples_eval)
+                ce = cross_entropy(failure_posterior_samples_eval, failure_dist)
+
+                if nominal_posterior_samples_eval:
+                    f_score_eval = f_score(
+                        nominal_posterior_samples_eval,
+                        failure_posterior_samples_eval,
+                        nominal_dist,
+                        failure_dist,
+                    )
 
         wandb.log(
             {
                 "Failure/ELBO": failure_elbo.detach().cpu().item(),
                 "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
-                # "Failure/Sinkhorn (eval)": sinkhorn_dist,
-                "Failure/MMD (eval)": mmd,
-                "Failure/F score (eval)": f_score_eval,
-                "Failure/CE (eval)": ce,
+                "Failure/MMD (eval)": mmd if failure_posterior_samples_eval else None,
+                "Failure/F score (eval)": f_score_eval
+                if failure_posterior_samples_eval and nominal_posterior_samples_eval
+                else None,
+                "Failure/CE (eval)": ce if failure_posterior_samples_eval else None,
                 "Failure/loss": failure_loss.detach().cpu().item(),
                 "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
             }

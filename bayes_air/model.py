@@ -12,7 +12,11 @@ FAR_FUTURE_TIME = 30.0
 
 
 def air_traffic_network_model(
-    states: list[NetworkState], delta_t: float = 0.1, max_t: float = FAR_FUTURE_TIME
+    states: list[NetworkState],
+    delta_t: float = 0.1,
+    max_t: float = FAR_FUTURE_TIME,
+    device=None,
+    include_cancellations: bool = False,
 ):
     """
     Simulate the behavior of an air traffic network.
@@ -22,24 +26,31 @@ def air_traffic_network_model(
             simulation from each start state). All states must include the same
             airports.
         delta_t: the time resolution of the simulation, in hours
+        max_t: the maximum time to simulate, in hours
+        device: the device to run the simulation on
+        include_cancellations: whether to include the possibility of flight
+            cancellations (if False, crew/aircraft reserves will not be modeled)
     """
+    if device is None:
+        device = torch.device("cpu")
+
     # Copy state to avoid modifying it
     states = deepcopy(states)
 
     # Define system-level parameters
     runway_use_time_std_dev = pyro.param(
         "runway_use_time_std_dev",
-        torch.tensor(0.025),
+        torch.tensor(0.1),  # used to be 0.025
         constraint=dist.constraints.positive,
     )
     travel_time_variation = pyro.param(
         "travel_time_variation",
-        torch.tensor(0.05),
+        torch.tensor(0.1),  # used to be 0.05
         constraint=dist.constraints.positive,
     )
     turnaround_time_variation = pyro.param(
         "turnaround_time_variation",
-        torch.tensor(0.05),
+        torch.tensor(0.1),  # used to be 0.05
         constraint=dist.constraints.positive,
     )
 
@@ -47,12 +58,6 @@ def air_traffic_network_model(
     airport_codes = states[0].airports.keys()
     airport_turnaround_times = {
         code: pyro.sample(f"{code}_mean_turnaround_time", dist.Gamma(1.0, 2.0))
-        for code in airport_codes
-    }
-    airport_initial_available_aircraft = {
-        code: torch.exp(
-            pyro.sample(f"{code}_log_initial_available_aircraft", dist.Normal(0.0, 1.0))
-        )
         for code in airport_codes
     }
     airport_service_times = {
@@ -67,6 +72,21 @@ def air_traffic_network_model(
         for destination in airport_codes
         if origin != destination
     }
+
+    if include_cancellations:
+        airport_initial_available_aircraft = {
+            code: torch.exp(
+                pyro.sample(
+                    f"{code}_log_initial_available_aircraft", dist.Normal(0.0, 1.0)
+                )
+            )
+            for code in airport_codes
+        }
+    else:
+        # To ignore cancellations, just provide practcially infinite reserves
+        airport_initial_available_aircraft = {
+            code: torch.tensor(1000.0, device=device) for code in airport_codes
+        }
 
     # Simulate for each state
     output_states = []
