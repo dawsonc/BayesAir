@@ -253,6 +253,7 @@ def train(
                 {
                     "failure_guide": failure_guide.state_dict(),
                     "mixture_label": mixture_label,
+                    "failure_permutations": failure_permutations,
                 },
                 f"checkpoints/{name}/failure_checkpoint_{i}.pt",
             )
@@ -333,5 +334,8 @@ def train(
                 else {}
             )
         )
+
+    # Save the model to wandb
+    wandb.save(f"checkpoints/{name}/failure_checkpoint_{num_steps - 1}.pt")
 
     return failure_guide, mixture_label

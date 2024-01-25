@@ -34,7 +34,7 @@ from scripts.utils import kl_divergence
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=100, type=int, help="# of steps")
+@option("--n-steps", default=400, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
@@ -142,7 +142,7 @@ def run(
     nominal = nominal_dfs[-n_nominal:]
     failure = disrupted_dfs[: 2 * n_failure : 2]
     n_failure_eval = n_failure
-    failure_eval = disrupted_dfs[1 : 1 + n_failure_eval : 2]
+    failure_eval = disrupted_dfs[1 : 1 + n_failure : 2]
 
     # Filter out cancellations if we're not using them
     if not include_cancellations:
@@ -450,7 +450,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-debug",
+        project="wn-1",
         name=run_name,
         group=run_name,
         config={
