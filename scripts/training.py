@@ -109,6 +109,13 @@ def train(
     for i in range(calibration_num_permutations):
         failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
 
+    # Add the permutations to a wandb table
+    if calibrate:
+        columns = [f"Permutation {i}" for i in range(calibration_num_permutations)]
+        data = [failure_permutations[i].cpu().tolist() for i in range(len(columns))]
+        table = wandb.Table(data=data, columns=columns)
+        wandb.log({"Failure data permutations": table}, commit=False)
+
     # Train the model
     pbar = tqdm(range(num_steps))
     for i in pbar:
