@@ -110,15 +110,13 @@ def run(
 
     # Generate training data
     with torch.no_grad():
-        nominal_samples = generate_two_moons_data(
-            n_nominal, device, failure=False
-        ).cpu()
-        failure_samples = generate_two_moons_data(n_failure, device, failure=True).cpu()
+        nominal_samples = generate_two_moons_data(n_nominal, device, failure=False)
+        failure_samples = generate_two_moons_data(n_failure, device, failure=True)
 
         # Also make some eval data
         failure_samples_eval = generate_two_moons_data(
             n_failure_eval, device, failure=True
-        ).cpu()
+        )
 
     # Change seed for training
     torch.manual_seed(seed)
@@ -140,7 +138,7 @@ def run(
     def plot_posterior(*dists, labels=None, save_file_name=None, save_wandb=False):
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         for i, dist in enumerate(dists):
-            samples = dist.sample((1000,))
+            samples = dist.sample((1000,)).cpu().numpy()
             ax.scatter(
                 samples[:, 0], samples[:, 1], s=1, label=labels[i] if labels else None
             )
@@ -179,15 +177,15 @@ def run(
 
         for row, j in enumerate(torch.linspace(0, 1, n_steps)):
             for i in range(n_calibration_permutations):
-                label = torch.zeros(n_calibration_permutations)
+                label = torch.zeros(n_calibration_permutations).to(nominal_label.device)
                 label[i] = j
 
                 nominal_samples = failure_guide(nominal_label).sample((1_000,))
                 nominal_labels = torch.tensor([0.0]).expand(1_000)
                 failure_samples = failure_guide(label).sample((1_000,))
                 failure_labels = torch.tensor([1.0]).expand(1_000)
-                samples = torch.cat((nominal_samples, failure_samples), axis=0)
-                labels = torch.cat((nominal_labels, failure_labels), axis=0)
+                samples = torch.cat((nominal_samples, failure_samples), axis=0).cpu()
+                labels = torch.cat((nominal_labels, failure_labels), axis=0).cpu()
 
                 axs[row, i].scatter(*samples.T, s=1, c=labels, cmap="bwr")
                 axs[row, i].set_xticks([])
@@ -212,7 +210,7 @@ def run(
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
     wandb.init(
-        project="two-moons-3",
+        project="two-moons-cuda",
         name=run_name,
         group=run_name,
         config={
@@ -249,11 +247,11 @@ def run(
     if wasserstein:
         failure_guide = zuko.flows.CNF(
             features=2, context=n_calibration_permutations, hidden_features=(128, 128)
-        )
+        ).to(device)
     else:
         failure_guide = zuko.flows.NSF(
             features=2, context=n_calibration_permutations, hidden_features=(64, 64)
-        )
+        ).to(device)
 
     # Train the model
     train(
@@ -264,6 +262,8 @@ def run(
         failure_observations=failure_samples,
         n_failure_eval=n_failure_eval,
         failure_observations_eval=failure_samples_eval,
+        failure_posterior_samples_eval=failure_samples_eval,
+        nominal_posterior_samples_eval=nominal_samples,
         objective_fn=objective_fn,
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,

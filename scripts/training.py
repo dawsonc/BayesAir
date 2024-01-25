@@ -14,6 +14,8 @@ def train(
     failure_observations,
     n_failure_eval,
     failure_observations_eval,
+    failure_posterior_samples_eval,
+    nominal_posterior_samples_eval,
     objective_fn,
     divergence_fn,
     plot_posterior,
@@ -50,6 +52,10 @@ def train(
         failure_observations: Observed data for the failure case.
         n_failure_eval: Number of failure observations for evaluation.
         failure_observations_eval: Observed data for the failure case for evaluation.
+        failure_posterior_samples_eval: Samples from the failure posterior for
+            evaluation.
+        nominal_posterior_samples_eval: Samples from the nominal posterior for
+            evaluation.
         objective_fn: Function for computing the inference objective (e.g. likelihood or
             ELBO).
         divergence_fn: Function for computing the divergence.
@@ -89,8 +95,8 @@ def train(
     failure_scheduler = torch.optim.lr_scheduler.StepLR(
         failure_optimizer, step_size=lr_steps, gamma=lr_gamma
     )
-    mixture_label = torch.zeros(calibration_num_permutations, requires_grad=True).to(
-        device
+    mixture_label = torch.zeros(
+        calibration_num_permutations, requires_grad=True, device=device
     )
     mixture_label_optimizer = torch.optim.Adam([mixture_label], lr=calibration_lr)
 
@@ -252,16 +258,16 @@ def train(
                     torch.ones(calibration_num_permutations).to(device)
                 )
 
-            n_eval = failure_observations_eval.shape[0]
+            n_eval = failure_posterior_samples_eval.shape[0]
             p_samples_eval = failure_dist.sample((n_eval,))
-            mmd = simple_mmd(p_samples_eval, failure_observations_eval)
+            mmd = simple_mmd(p_samples_eval, failure_posterior_samples_eval)
             f_score_eval = f_score(
-                nominal_observations,
-                failure_observations_eval,
+                nominal_posterior_samples_eval,
+                failure_posterior_samples_eval,
                 nominal_dist,
                 failure_dist,
             )
-            ce = cross_entropy(failure_observations_eval, failure_dist)
+            ce = cross_entropy(failure_posterior_samples_eval, failure_dist)
 
         wandb.log(
             {

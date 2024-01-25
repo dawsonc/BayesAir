@@ -17,7 +17,7 @@ from scripts.utils import kl_divergence
 @command()
 @option("--n-nominal", default=100, help="# of nominal examples")
 @option("--n-failure", default=4, help="# of failure examples for training")
-@option("--n-failure-eval", default=100, help="# of failure examples for evaluation")
+@option("--n-failure-eval", default=500, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
@@ -198,7 +198,8 @@ def run(
 
             elbo += (model_logprob - posterior_logprob) / n_elbo_particles
 
-        return -elbo  #  negative to make it a loss
+        # Make it negative to make it a loss and scale by the dimension
+        return -elbo / (NY_COARSE * NX_COARSE)
 
     def divergence_fn(p, q):
         """Compute the KL divergence"""
@@ -244,12 +245,13 @@ def run(
 
         for row, j in enumerate(torch.linspace(0, 1, n_steps)):
             for i in range(n_calibration_permutations):
-                label = torch.zeros(n_calibration_permutations)
+                label = torch.zeros(n_calibration_permutations).to(nominal_label.device)
                 label[i] = j
 
                 sample_mean = (
                     failure_guide(label).sample((100,)).mean(dim=0).cpu().numpy()
                 )
+                sample_mean = sample_mean.reshape(NY_COARSE, NX_COARSE)
 
                 axs[row, i].imshow(sample_mean, cmap="Blues")
 
@@ -268,7 +270,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="swi",
+        project="swi-1",
         name=run_name,
         group=run_name,
         config={
@@ -304,12 +306,16 @@ def run(
     # Initialize the models
     if wasserstein:
         failure_guide = zuko.flows.CNF(
-            features=2, context=n_calibration_permutations, hidden_features=(64, 64)
-        )
+            features=NY_COARSE * NX_COARSE,
+            context=n_calibration_permutations,
+            hidden_features=(64, 64),
+        ).to(device)
     else:
         failure_guide = zuko.flows.NSF(
-            features=2, context=n_calibration_permutations, hidden_features=(64, 64)
-        )
+            features=NY_COARSE * NX_COARSE,
+            context=n_calibration_permutations,
+            hidden_features=(64, 64),
+        ).to(device)
 
     # Train the model
     train(
@@ -320,6 +326,12 @@ def run(
         failure_observations=failure_observations,
         n_failure_eval=n_failure_eval,
         failure_observations_eval=failure_observations_eval,
+        failure_posterior_samples_eval=profile_failure_eval.reshape(
+            -1, NY_COARSE * NX_COARSE
+        ),
+        nominal_posterior_samples_eval=profile_nominal.reshape(
+            -1, NY_COARSE * NX_COARSE
+        ),
         objective_fn=objective_fn,
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,

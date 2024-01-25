@@ -34,7 +34,7 @@ def f_score(nominal_samples, failure_samples, nominal_dist, failure_dist):
             torch.ones(failure_samples.shape[0]),
         ],
         dim=0,
-    )
+    ).to(samples.device)
 
     # Compute the likelihood ratio and classify as a failure if is >= 1 (more likely
     # to be from the failure distribution than the nominal distribution)
@@ -42,7 +42,8 @@ def f_score(nominal_samples, failure_samples, nominal_dist, failure_dist):
     predicted_labels = (likelihood_ratio >= 0).float()
 
     # Get the f score
-    f_score = BinaryF1Score()(predicted_labels, true_labels)
+    f1_loss = BinaryF1Score().to(samples.device)
+    f_score = f1_loss(predicted_labels, true_labels)
     return f_score
 
 
