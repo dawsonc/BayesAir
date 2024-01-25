@@ -28,8 +28,8 @@ from scripts.utils import kl_divergence
     help="If true, include a crew model and cancellations",
 )
 @option("--n-nominal", default=18, help="# of nominal examples")
-@option("--n-failure", default=2, help="# of failure examples for training")
-@option("--n-failure-eval", default=2, help="# of failure examples for evaluation")
+@option("--n-failure", default=3, help="# of failure examples for training")
+@option("--n-failure-eval", default=3, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
@@ -126,8 +126,9 @@ def run(
     calibrate = not no_calibrate
 
     # Generate data (use the same seed for all runs)
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")  # WN model can run on GPU but is 2X slower than CPU
+    # WN model can run on GPU but is 2X slower than CPU, but you can run 4 at once
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
     torch.manual_seed(0)
     pyro.set_rng_seed(0)
 
@@ -450,7 +451,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-debug",
+        project="wn-1",
         name=run_name,
         group=run_name,
         config={
