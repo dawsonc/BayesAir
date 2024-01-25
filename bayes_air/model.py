@@ -40,33 +40,46 @@ def air_traffic_network_model(
     # Define system-level parameters
     runway_use_time_std_dev = pyro.param(
         "runway_use_time_std_dev",
-        torch.tensor(0.1),  # used to be 0.025
+        torch.tensor(0.1, device=device),  # used to be 0.025
         constraint=dist.constraints.positive,
     )
     travel_time_variation = pyro.param(
         "travel_time_variation",
-        torch.tensor(0.1),  # used to be 0.05
+        torch.tensor(0.1, device=device),  # used to be 0.05
         constraint=dist.constraints.positive,
     )
     turnaround_time_variation = pyro.param(
         "turnaround_time_variation",
-        torch.tensor(0.1),  # used to be 0.05
+        torch.tensor(0.1, device=device),  # used to be 0.05
         constraint=dist.constraints.positive,
     )
 
     # Sample latent variables for airports.
     airport_codes = states[0].airports.keys()
     airport_turnaround_times = {
-        code: pyro.sample(f"{code}_mean_turnaround_time", dist.Gamma(1.0, 2.0))
+        code: pyro.sample(
+            f"{code}_mean_turnaround_time",
+            dist.Gamma(
+                torch.tensor(1.0, device=device), torch.tensor(2.0, device=device)
+            ),
+        )
         for code in airport_codes
     }
     airport_service_times = {
-        code: pyro.sample(f"{code}_mean_service_time", dist.Gamma(1.5, 10.0))
+        code: pyro.sample(
+            f"{code}_mean_service_time",
+            dist.Gamma(
+                torch.tensor(1.5, device=device), torch.tensor(10.0, device=device)
+            ),
+        )
         for code in airport_codes
     }
     travel_times = {
         (origin, destination): pyro.sample(
-            f"travel_time_{origin}_{destination}", dist.Gamma(4.0, 1.25)
+            f"travel_time_{origin}_{destination}",
+            dist.Gamma(
+                torch.tensor(4.0, device=device), torch.tensor(1.25, device=device)
+            ),
         )
         for origin in airport_codes
         for destination in airport_codes
@@ -77,7 +90,11 @@ def air_traffic_network_model(
         airport_initial_available_aircraft = {
             code: torch.exp(
                 pyro.sample(
-                    f"{code}_log_initial_available_aircraft", dist.Normal(0.0, 1.0)
+                    f"{code}_log_initial_available_aircraft",
+                    dist.Normal(
+                        torch.tensor(0.0, device=device),
+                        torch.tensor(1.0, device=device),
+                    ),
                 )
             )
             for code in airport_codes
@@ -118,11 +135,11 @@ def air_traffic_network_model(
             ]
             i = 0
             while i < airport.num_available_aircraft:
-                airport.available_aircraft.append(torch.tensor(0.0))
+                airport.available_aircraft.append(torch.tensor(0.0, device=device))
                 i += 1
 
         # Simulate the movement of aircraft within the system for a fixed period of time
-        t = 0.0
+        t = torch.tensor(0.0, device=device)
         while not state.complete:
             # Update the current time
             t += delta_t
@@ -138,7 +155,7 @@ def air_traffic_network_model(
                 # print(f"TIME'S UP! Adding reserve aircraft at time {t}")
                 for airport in state.airports.values():
                     airport.num_available_aircraft = airport.num_available_aircraft + 1
-                    airport.available_aircraft.append(torch.tensor(t))
+                    airport.available_aircraft.append(t)
 
             # All flights that are able to depart get moved to the runway queue at their
             # origin airport

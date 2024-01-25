@@ -78,9 +78,10 @@ class NetworkState:
             # Cancel some number of flights if there are not enough available aircraft
             cancellation_probability = 1 - torch.maximum(
                 torch.minimum(
-                    torch.tensor(1.0), num_available_aircraft / num_flights_to_depart
+                    torch.tensor(1.0, device=time.device),
+                    num_available_aircraft / num_flights_to_depart,
                 ),
-                torch.tensor(0.0),
+                torch.tensor(0.0, device=time.device),
             )
 
             # print(

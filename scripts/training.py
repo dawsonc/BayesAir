@@ -38,7 +38,7 @@ def train(
     calibration_ub,
     calibration_lr,
     calibration_substeps,
-    calibration_steps,
+    calibration_steps=200,
     plot_every_n=10,
     device=None,
 ):
@@ -111,8 +111,11 @@ def train(
 
     # Add the permutations to a wandb table
     if calibrate:
-        columns = [f"Permutation {i}" for i in range(calibration_num_permutations)]
-        data = [failure_permutations[i].cpu().tolist() for i in range(len(columns))]
+        columns = [f"Permutation member {i}" for i in range(n_failure // 2)]
+        data = [
+            failure_permutation.cpu().tolist()
+            for failure_permutation in failure_permutations
+        ]
         table = wandb.Table(data=data, columns=columns)
         wandb.log({"Failure data permutations": table}, commit=False)
 

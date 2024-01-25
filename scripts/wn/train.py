@@ -34,7 +34,7 @@ from scripts.utils import kl_divergence
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=400, type=int, help="# of steps")
+@option("--n-steps", default=300, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
@@ -127,7 +127,7 @@ def run(
 
     # Generate data (use the same seed for all runs)
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")  # WN model not GPU-ized yet
+    device = torch.device("cpu")  # WN model can run on GPU but is 2X slower than CPU
     torch.manual_seed(0)
     pyro.set_rng_seed(0)
 
@@ -156,7 +156,7 @@ def run(
     failure_eval_states = []
 
     for day_df in nominal:
-        flights, airports = parse_schedule(day_df)
+        flights, airports = parse_schedule(day_df, device=device)
 
         state = NetworkState(
             airports={airport.code: airport for airport in airports},
@@ -165,7 +165,7 @@ def run(
         nominal_states.append(state)
 
     for day_df in failure:
-        flights, airports = parse_schedule(day_df)
+        flights, airports = parse_schedule(day_df, device=device)
 
         state = NetworkState(
             airports={airport.code: airport for airport in airports},
@@ -174,7 +174,7 @@ def run(
         failure_states.append(state)
 
     for day_df in failure_eval:
-        flights, airports = parse_schedule(day_df)
+        flights, airports = parse_schedule(day_df, device=device)
 
         state = NetworkState(
             airports={airport.code: airport for airport in airports},
@@ -450,7 +450,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-1",
+        project="wn-debug",
         name=run_name,
         group=run_name,
         config={
