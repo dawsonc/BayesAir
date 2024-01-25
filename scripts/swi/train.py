@@ -22,11 +22,11 @@ from scripts.utils import kl_divergence
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=100, type=int, help="# of steps")
+@option("--n-steps", default=500, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
-@option("--grad-clip", default=100, type=float, help="Gradient clipping value")
+@option("--grad-clip", default=10, type=float, help="Gradient clipping value")
 @option("--weight-decay", default=0.0, type=float, help="Weight decay rate")
 @option("--run-prefix", default="", help="Prefix for run name")
 @option(
@@ -99,6 +99,7 @@ def run(
 ):
     """Generate data and train the SWI model."""
     matplotlib.use("Agg")
+    matplotlib.rcParams["figure.dpi"] = 300
 
     # Parse arguments
     calibrate = not no_calibrate
@@ -222,7 +223,7 @@ def run(
         fig.tight_layout()
 
         if save_file_name:
-            plt.savefig(save_file_name, bbox_inches="tight")
+            plt.savefig(save_file_name, bbox_inches="tight", dpi=300)
 
         if save_wandb:
             wandb.log({"Posteriors": wandb.Image(fig)}, commit=False)
@@ -256,7 +257,7 @@ def run(
                 axs[row, i].imshow(sample_mean, cmap="Blues")
 
         if save_file_name:
-            plt.savefig(save_file_name, bbox_inches="tight")
+            plt.savefig(save_file_name, bbox_inches="tight", dpi=300)
 
         if save_wandb:
             wandb.log({"Posterior grid": wandb.Image(fig)}, commit=False)

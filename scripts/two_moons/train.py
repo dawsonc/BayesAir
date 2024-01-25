@@ -99,6 +99,7 @@ def run(
 ):
     """Generate data and train the SWI model."""
     matplotlib.use("Agg")
+    matplotlib.rcParams["figure.dpi"] = 300
 
     # Parse arguments
     calibrate = not no_calibrate
@@ -154,7 +155,7 @@ def run(
             ax.legend()
 
         if save_file_name:
-            plt.savefig(save_file_name, bbox_inches="tight")
+            plt.savefig(save_file_name, bbox_inches="tight", dpi=300)
 
         if save_wandb:
             wandb.log({"Posteriors": wandb.Image(fig)}, commit=False)
@@ -196,7 +197,7 @@ def run(
                 axs[row, i].set_aspect("equal")
 
         if save_file_name:
-            plt.savefig(save_file_name, bbox_inches="tight")
+            plt.savefig(save_file_name, bbox_inches="tight", dpi=300)
 
         if save_wandb:
             wandb.log({"Posterior grid": wandb.Image(fig)}, commit=False)
