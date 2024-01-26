@@ -21,15 +21,15 @@ from scripts.utils import kl_divergence
 
 
 @command()
-@option("--top-n", default=4, help="# of airports to include")
+@option("--top-n", default=10, help="# of airports to include")
 @option(
     "--include-cancellations",
     is_flag=True,
     help="If true, include a crew model and cancellations",
 )
 @option("--n-nominal", default=9, help="# of nominal examples")
-@option("--n-failure", default=4, help="# of failure examples for training")
-@option("--n-failure-eval", default=4, help="# of failure examples for evaluation")
+@option("--n-failure", default=2, help="# of failure examples for training")
+@option("--n-failure-eval", default=2, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
@@ -133,7 +133,7 @@ def run(
     pyro.set_rng_seed(0)
 
     # Load the data
-    df = pd.read_pickle("data/wn_data_clean.pkl")
+    df = pd.read_pickle("data/wn_data_clean_mst.pkl")
     df = ba_dataloader.top_N_df(df, top_n)
     nominal_df, disrupted_df = ba_dataloader.split_nominal_disrupted_data(df)
     nominal_dfs = ba_dataloader.split_by_date(nominal_df)
@@ -458,7 +458,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-2",
+        project="wn-case-study",
         name=run_name,
         group=run_name,
         config={

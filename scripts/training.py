@@ -106,7 +106,12 @@ def train(
 
     # Create the permutations for training the calibrated model
     failure_permutations = []
-    for i in range(calibration_num_permutations):
+    # Make sure the first two permutations cover the data
+    assert calibration_num_permutations >= 2, "Need at least two permutations"
+    first_permutation = torch.randperm(n_failure)
+    failure_permutations.append(first_permutation[: n_failure // 2])
+    failure_permutations.append(first_permutation[-n_failure // 2 :])
+    for i in range(2, calibration_num_permutations):
         failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
 
     # Add the permutations to a wandb table
