@@ -107,7 +107,8 @@ def convert_to_float_hours_optimized(time_series, time_zone_series):
     # Convert time objects to UTC
     combined_df = pd.concat([time_objects, time_zone_series], axis=1)
     time_objects = combined_df.apply(
-        lambda row: row.iloc[0].tz_localize(row.iloc[1]).tz_convert("UTC"), axis=1
+        lambda row: row.iloc[0].tz_localize(row.iloc[1]).tz_convert("America/Denver"),
+        axis=1,
     )
 
     # Extract hour and minute components
@@ -317,7 +318,9 @@ if __name__ == "__main__":
 
     # Save remapped data to file
     script_directory = os.path.dirname(os.path.abspath(__file__))
-    df.to_pickle(os.path.join(script_directory, "../..", "data", "wn_data_clean.pkl"))
+    df.to_pickle(
+        os.path.join(script_directory, "../..", "data", "wn_data_clean_mst.pkl")
+    )
 
     # Plot a histogram of the total number of flights between top-N airports
     N_range = [2, 3, 4, 5, 6, 7, 8, 9, 10]
