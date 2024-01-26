@@ -27,9 +27,9 @@ from scripts.utils import kl_divergence
     is_flag=True,
     help="If true, include a crew model and cancellations",
 )
-@option("--n-nominal", default=18, help="# of nominal examples")
-@option("--n-failure", default=3, help="# of failure examples for training")
-@option("--n-failure-eval", default=3, help="# of failure examples for evaluation")
+@option("--n-nominal", default=9, help="# of nominal examples")
+@option("--n-failure", default=4, help="# of failure examples for training")
+@option("--n-failure-eval", default=4, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
@@ -38,7 +38,7 @@ from scripts.utils import kl_divergence
 @option("--lr", default=1e-3, type=float, help="Learning rate")
 @option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
 @option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
-@option("--grad-clip", default=10, type=float, help="Gradient clipping value")
+@option("--grad-clip", default=100, type=float, help="Gradient clipping value")
 @option("--weight-decay", default=0.0, type=float, help="Weight decay rate")
 @option("--run-prefix", default="", help="Prefix for run name")
 @option(
@@ -340,6 +340,7 @@ def run(
                         sample_map[f"{code}_log_initial_available_aircraft"]
                     ).cpu(),
                     bins=64,
+                    density=True,
                     label=labels[j] if labels else None,
                     alpha=1 / len(sample_maps),
                 )
@@ -369,6 +370,7 @@ def run(
                 axs[f"{i}"].hist(
                     sample_map[f"{code}_mean_service_time"].cpu(),
                     bins=64,
+                    density=True,
                     label=labels[j] if labels else None,
                     alpha=1 / len(sample_maps),
                 )
@@ -432,8 +434,13 @@ def run(
                 sample_map = map_to_sample_sites(samples)
 
                 code = "DEN"
-                axs[row, i].hist(sample_map[f"{code}_mean_service_time"].cpu(), bins=64)
+                axs[row, i].hist(
+                    sample_map[f"{code}_mean_service_time"].cpu(), bins=64, density=True
+                )
                 axs[row, i].set_xlabel(f"{code} service time (hr)")
+                x_min, x_max = axs[row, i].get_xlim()
+                x_min = min(x_min, -0.05)
+                x_max = max(x_max, 1.05)
                 axs[row, i].set_xlim(-0.05, 1.05)
 
         if save_file_name:
@@ -451,7 +458,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-1",
+        project="wn-debug",
         name=run_name,
         group=run_name,
         config={
@@ -536,7 +543,7 @@ def run(
         calibration_substeps=calibration_substeps,
         calibration_steps=calibration_steps,
         # plot_every_n=n_steps,
-        plot_every_n=10,
+        plot_every_n=50,
         device=device,
     )
 
