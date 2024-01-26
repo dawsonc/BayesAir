@@ -71,6 +71,11 @@ from scripts.utils import kl_divergence
 )
 @option("--calibration-lr", default=1e-3, type=float, help="LR for calibration")
 @option("--calibration-substeps", default=1, type=int, help="# of calibration substeps")
+@option(
+    "--exclude-nominal",
+    is_flag=True,
+    help="If True, don't learn the nominal distribution",
+)
 def run(
     n_nominal,
     n_failure,
@@ -96,6 +101,7 @@ def run(
     calibration_ub,
     calibration_lr,
     calibration_substeps,
+    exclude_nominal,
 ):
     """Generate data and train the SWI model."""
     matplotlib.use("Agg")
@@ -271,7 +277,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="swi-1",
+        project="swi-ablation",
         name=run_name,
         group=run_name,
         config={
@@ -298,6 +304,7 @@ def run(
             "calibration_ub": calibration_ub,
             "calibration_lr": calibration_lr,
             "calibration_substeps": calibration_substeps,
+            "exclude_nominal": exclude_nominal,
         },
     )
 
@@ -356,6 +363,7 @@ def run(
         calibration_lr=calibration_lr,
         calibration_substeps=calibration_substeps,
         plot_every_n=n_steps,
+        exclude_nominal=exclude_nominal,
     )
 
 

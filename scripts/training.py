@@ -41,6 +41,7 @@ def train(
     calibration_steps=200,
     plot_every_n=10,
     device=None,
+    exclude_nominal=False,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
@@ -86,6 +87,9 @@ def train(
         calibration_substeps: number of calibration steps to take per training step
         calibration_steps: number of calibration steps to take prior to evaluation
         plot_every_n: number of steps between plotting
+        device: device to use for training
+        exclude_nominal: if True, exclude the nominal data from the failure model
+            training
     """
     if device is None:
         device = nominal_observations.device
@@ -99,9 +103,17 @@ def train(
     failure_scheduler = torch.optim.lr_scheduler.StepLR(
         failure_optimizer, step_size=lr_steps, gamma=lr_gamma
     )
-    mixture_label = torch.zeros(
-        calibration_num_permutations, requires_grad=True, device=device
-    )
+
+    # If the calibration lr is zero, freeze the mixture label at 1
+    if calibration_lr == 0:
+        print("Freezing calibration label at 1")
+        mixture_label = torch.ones(
+            calibration_num_permutations, requires_grad=False, device=device
+        )
+    else:
+        mixture_label = torch.zeros(
+            calibration_num_permutations, requires_grad=True, device=device
+        )
     mixture_label_optimizer = torch.optim.Adam([mixture_label], lr=calibration_lr)
 
     # Create the permutations for training the calibrated model
@@ -207,7 +219,8 @@ def train(
             n_nominal,
             nominal_observations,
         )
-        failure_loss += elbo_weight * failure_nominal_elbo
+        if not exclude_nominal:
+            failure_loss += elbo_weight * failure_nominal_elbo
 
         # Optimimze the failure model
         failure_loss.backward()
@@ -280,13 +293,13 @@ def train(
                     torch.ones(calibration_num_permutations).to(device)
                 )
 
-            if failure_posterior_samples_eval:
+            if failure_posterior_samples_eval is not None:
                 n_eval = failure_posterior_samples_eval.shape[0]
                 p_samples_eval = failure_dist.sample((n_eval,))
                 mmd = simple_mmd(p_samples_eval, failure_posterior_samples_eval)
                 ce = cross_entropy(failure_posterior_samples_eval, failure_dist)
 
-                if nominal_posterior_samples_eval:
+                if nominal_posterior_samples_eval is not None:
                     f_score_eval = f_score(
                         nominal_posterior_samples_eval,
                         failure_posterior_samples_eval,
@@ -298,11 +311,16 @@ def train(
             {
                 "Failure/ELBO": failure_elbo.detach().cpu().item(),
                 "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
-                "Failure/MMD (eval)": mmd if failure_posterior_samples_eval else None,
-                "Failure/F score (eval)": f_score_eval
-                if failure_posterior_samples_eval and nominal_posterior_samples_eval
+                "Failure/MMD (eval)": mmd
+                if failure_posterior_samples_eval is not None
                 else None,
-                "Failure/CE (eval)": ce if failure_posterior_samples_eval else None,
+                "Failure/F score (eval)": f_score_eval
+                if failure_posterior_samples_eval is not None
+                and nominal_posterior_samples_eval is not None
+                else None,
+                "Failure/CE (eval)": ce
+                if failure_posterior_samples_eval is not None
+                else None,
                 "Failure/loss": failure_loss.detach().cpu().item(),
                 "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
             }
