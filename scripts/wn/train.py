@@ -1,4 +1,5 @@
 """Implement CalVI training for the southwest network problem."""
+import datetime
 import os
 from itertools import combinations
 from math import ceil
@@ -89,6 +90,11 @@ from scripts.utils import kl_divergence
     type=int,
     help="# of calibration steps for evaluation",
 )
+@option(
+    "--exclude-nominal",
+    is_flag=True,
+    help="If True, don't learn the nominal distribution",
+)
 def run(
     top_n,
     include_cancellations,
@@ -117,6 +123,7 @@ def run(
     calibration_lr,
     calibration_substeps,
     calibration_steps,
+    exclude_nominal,
 ):
     """Generate data and train the SWI model."""
     matplotlib.use("Agg")
@@ -458,7 +465,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-case-study",
+        project="wn-ablation",
         name=run_name,
         group=run_name,
         config={
@@ -488,11 +495,13 @@ def run(
             "calibration_lr": calibration_lr,
             "calibration_substeps": calibration_substeps,
             "calibration_steps": calibration_steps,
+            "exclude_nominal": exclude_nominal,
         },
     )
 
     # Make a directory for checkpoints if it doesn't already exist
-    os.makedirs(f"checkpoints/swi/{run_name}", exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    os.makedirs(f"checkpoints/wn/{run_name}/{timestamp}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:
@@ -523,7 +532,7 @@ def run(
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,
         plot_posterior_grid=plot_posterior_grid,
-        name="swi/" + run_name,
+        name="wn/" + run_name + "/" + timestamp,
         calibrate=calibrate,
         regularize=regularize,
         num_steps=n_steps,
@@ -545,6 +554,7 @@ def run(
         # plot_every_n=n_steps,
         plot_every_n=50,
         device=device,
+        exclude_nominal=exclude_nominal,
     )
 
 
