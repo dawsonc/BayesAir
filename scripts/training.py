@@ -104,11 +104,11 @@ def train(
         failure_optimizer, step_size=lr_steps, gamma=lr_gamma
     )
 
-    # If the calibration lr is zero, freeze the mixture label at 1
+    # If the calibration lr is zero, freeze the mixture label
     if calibration_lr == 0:
-        print("Freezing calibration label at 1")
-        mixture_label = torch.ones(
-            calibration_num_permutations, requires_grad=False, device=device
+        mixture_label = (
+            torch.ones(calibration_num_permutations, requires_grad=False, device=device)
+            / calibration_num_permutations
         )
     else:
         mixture_label = torch.zeros(
