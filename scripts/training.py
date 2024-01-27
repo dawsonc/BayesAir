@@ -124,7 +124,7 @@ def train(
     assert calibration_num_permutations >= 2, "Need at least two permutations"
     first_permutation = torch.randperm(n_failure)
     failure_permutations.append(first_permutation[: n_failure // 2])
-    failure_permutations.append(first_permutation[-n_failure // 2 :])
+    failure_permutations.append(first_permutation[-(n_failure // 2) :])
     for i in range(2, calibration_num_permutations):
         failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
 
