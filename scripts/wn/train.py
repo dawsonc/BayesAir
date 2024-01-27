@@ -358,7 +358,10 @@ def run(
                 )
 
             axs[f"{i}"].set_xlabel(f"{code} aircraft reserve")
-            axs[f"{i}"].set_xlim(-0.05, 30.0)
+            x_min, x_max = axs[f"{i}"].get_xlim()
+            x_min = min(x_min, -0.05)
+            x_max = max(x_max, 30)
+            axs[f"{i}"].set_xlim(x_min, x_max)
             axs[f"{i}"].legend()
 
         return fig
@@ -388,7 +391,7 @@ def run(
                 )
 
             axs[f"{i}"].set_xlabel(f"{code} cancel prob")
-            axs[f"{i}"].set_xlim(-0.05, 30.0)
+            axs[f"{i}"].set_xlim(-0.05, 1.0)
             axs[f"{i}"].legend()
 
         return fig
@@ -505,7 +508,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-case-study",
+        project="wn-ablation",
         name=run_name,
         group=run_name,
         config={

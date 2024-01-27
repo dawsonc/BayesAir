@@ -2,7 +2,7 @@
 
 # Ours
 for seed in 0 1 2 3; do
-    CUDA_VISIBLE_DEVICES=3, poetry run python scripts/wn/train.py --top-n 4 --n-failure 4 --n-failure-eval 4 --seed $seed &
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/wn/train.py --top-n 4 --n-failure 4 --n-failure-eval 4 --seed $seed &
 done
 
 # # Hold label constant
