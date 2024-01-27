@@ -202,6 +202,7 @@ def run(
     )
     if include_cancellations:
         n_latent_variables += n_airports  # log # of initial aircraft for each airport
+        n_latent_variables += n_airports  # baseline cancel prob for each airport
 
     # Fixed model parameter: timestep
     dt = 0.2
@@ -226,8 +227,9 @@ def run(
             log_airport_initial_available_aircraft = sample[
                 :, 2 * n_airports : 3 * n_airports
             ]
+            log_airport_base_cancel_prob = sample[:, 3 * n_airports : 4 * n_airports]
             travel_times = torch.exp(
-                sample[:, 3 * n_airports :].reshape(-1, n_airports, n_airports)
+                sample[:, 4 * n_airports :].reshape(-1, n_airports, n_airports)
             )
         else:
             travel_times = torch.exp(
@@ -245,6 +247,9 @@ def run(
                 conditioning_dict[
                     f"{code}_log_initial_available_aircraft"
                 ] = log_airport_initial_available_aircraft[:, i]
+                conditioning_dict[
+                    f"{code}_base_cancel_logprob"
+                ] = log_airport_base_cancel_prob[:, i]
 
         for i, origin in enumerate(airport_codes):
             for j, destination in enumerate(airport_codes):
@@ -305,7 +310,7 @@ def run(
                 [f"{i * max_pairs_per_row +j}" for j in range(max_pairs_per_row)]
             )
 
-        fig = plt.figure(layout="constrained", figsize=(12, 4 * max_rows))
+        fig = plt.figure(figsize=(12 * max_rows, 4 * max_rows))
         axs = fig.subplot_mosaic(subplot_spec)
 
         for i, pair in enumerate(pairs):
@@ -337,7 +342,7 @@ def run(
                 [f"{i * max_plots_per_row +j}" for j in range(max_plots_per_row)]
             )
 
-        fig = plt.figure(layout="constrained", figsize=(12, 4 * max_rows))
+        fig = plt.figure(figsize=(12 * max_rows, 4 * max_rows))
         axs = fig.subplot_mosaic(subplot_spec)
 
         for i, code in enumerate(airport_codes):
@@ -359,6 +364,36 @@ def run(
         return fig
 
     @torch.no_grad()
+    def plot_base_cancel_prob(*sample_maps, labels=None):
+        # Make subplots for each airport
+        max_rows = 2
+        max_plots_per_row = ceil(n_airports / max_rows)
+        subplot_spec = []
+        for i in range(max_rows):
+            subplot_spec.append(
+                [f"{i * max_plots_per_row +j}" for j in range(max_plots_per_row)]
+            )
+
+        fig = plt.figure(figsize=(12 * max_rows, 4 * max_rows))
+        axs = fig.subplot_mosaic(subplot_spec)
+
+        for i, code in enumerate(airport_codes):
+            for j, sample_map in enumerate(sample_maps):
+                axs[f"{i}"].hist(
+                    torch.exp(sample_map[f"{code}_base_cancel_logprob"]).cpu(),
+                    bins=64,
+                    density=True,
+                    label=labels[j] if labels else None,
+                    alpha=1 / len(sample_maps),
+                )
+
+            axs[f"{i}"].set_xlabel(f"{code} cancel prob")
+            axs[f"{i}"].set_xlim(-0.05, 30.0)
+            axs[f"{i}"].legend()
+
+        return fig
+
+    @torch.no_grad()
     def plot_service_times(*sample_maps, labels=None):
         # Make subplots for each airport
         max_rows = 2
@@ -369,7 +404,7 @@ def run(
                 [f"{i * max_plots_per_row +j}" for j in range(max_plots_per_row)]
             )
 
-        fig = plt.figure(layout="constrained", figsize=(12, 4 * max_rows))
+        fig = plt.figure(figsize=(12 * max_rows, 4 * max_rows))
         axs = fig.subplot_mosaic(subplot_spec)
 
         for i, code in enumerate(airport_codes):
@@ -410,6 +445,11 @@ def run(
                 wandb.log(
                     {"Posterior starting aircraft": wandb.Image(fig)}, commit=False
                 )
+            plt.close(fig)
+
+            fig = plot_base_cancel_prob(*sample_maps, labels=labels)
+            if save_wandb:
+                wandb.log({"Posterior cancel prob": wandb.Image(fig)}, commit=False)
             plt.close(fig)
 
         fig = plot_service_times(*sample_maps, labels=labels)
@@ -465,7 +505,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-ablation",
+        project="wn-case-study",
         name=run_name,
         group=run_name,
         config={
