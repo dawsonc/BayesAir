@@ -57,6 +57,7 @@ class Airport:
     num_available_aircraft: torch.tensor = field(
         default_factory=lambda: torch.tensor(0.0)
     )
+    base_cancel_prob: torch.tensor = field(default_factory=lambda: torch.tensor(0.0))
     runway_queue: list[QueueEntry] = field(default_factory=list)
     turnaround_queue: list[Time] = field(default_factory=list)
     available_aircraft: list[Time] = field(default_factory=list)

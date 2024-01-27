@@ -72,17 +72,24 @@ class NetworkState:
         ready_times = []
         for airport_code, flights in ready_to_depart_flights_by_airport.items():
             airport = self.airports[airport_code]
+            base_cancel_prob = airport.base_cancel_prob
             num_available_aircraft = airport.num_available_aircraft
             num_flights_to_depart = len(flights)
 
             # Cancel some number of flights if there are not enough available aircraft
-            cancellation_probability = 1 - torch.maximum(
-                torch.minimum(
-                    torch.tensor(1.0, device=time.device),
-                    num_available_aircraft / num_flights_to_depart,
-                ),
-                torch.tensor(0.0, device=time.device),
+            cancellation_probability = 1 - (
+                1 - base_cancel_prob
+            ) * torch.nn.functional.sigmoid(
+                10 * (num_available_aircraft / num_flights_to_depart - 0.25)
             )
+            # This gross sigmoid is a smooth approximation of this:
+            # cancellation_probability = 1 - torch.maximum(
+            #     torch.minimum(
+            #         torch.tensor(1.0, device=time.device),
+            #         num_available_aircraft / num_flights_to_depart,
+            #     ),
+            #     torch.tensor(0.0, device=time.device),
+            # )
 
             # print(
             #     f"{airport.code} has {num_available_aircraft} available aircraft; {num_flights_to_depart} flights ready to depart"

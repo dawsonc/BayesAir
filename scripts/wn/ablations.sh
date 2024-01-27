@@ -12,7 +12,7 @@ done
 
 # wait;
 
-# Don't learn nominal
-for seed in 0 1 2 3; do
-    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/wn/train.py --top-n 4 --n-failure 4 --n-failure-eval 4 --exclude-nominal --seed $seed &
-done
+# # Don't learn nominal
+# for seed in 0 1 2 3; do
+#     CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/wn/train.py --top-n 4 --n-failure 4 --n-failure-eval 4 --exclude-nominal --seed $seed &
+# done

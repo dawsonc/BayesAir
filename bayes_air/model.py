@@ -99,10 +99,25 @@ def air_traffic_network_model(
             )
             for code in airport_codes
         }
+        airport_base_cancel_prob = {
+            code: torch.exp(
+                pyro.sample(
+                    f"{code}_base_cancel_logprob",
+                    dist.Normal(
+                        torch.tensor(-3.0, device=device),
+                        torch.tensor(1.0, device=device),
+                    ),
+                )
+            )
+            for code in airport_codes
+        }
     else:
         # To ignore cancellations, just provide practcially infinite reserves
         airport_initial_available_aircraft = {
             code: torch.tensor(1000.0, device=device) for code in airport_codes
+        }
+        airport_base_cancel_prob = {
+            code: torch.tensor(0.0, device=device) for code in airport_codes
         }
 
     # Simulate for each state
@@ -128,6 +143,7 @@ def air_traffic_network_model(
             airport.turnaround_time_std_dev = (
                 turnaround_time_variation * airport.mean_turnaround_time
             )
+            airport.base_cancel_prob = airport_base_cancel_prob[airport.code]
 
             # Initialize the available aircraft list
             airport.num_available_aircraft = airport_initial_available_aircraft[

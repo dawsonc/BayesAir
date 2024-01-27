@@ -111,8 +111,9 @@ def train(
             / calibration_num_permutations
         )
     else:
-        mixture_label = torch.zeros(
-            calibration_num_permutations, requires_grad=True, device=device
+        mixture_label = (
+            torch.ones(calibration_num_permutations, requires_grad=True, device=device)
+            / calibration_num_permutations
         )
     mixture_label_optimizer = torch.optim.Adam([mixture_label], lr=calibration_lr)
 

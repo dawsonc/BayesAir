@@ -82,7 +82,7 @@ from scripts.utils import kl_divergence
 @option(
     "--calibration-ub", default=5e1, type=float, help="KL upper bound for calibration"
 )
-@option("--calibration-lr", default=1e-3, type=float, help="LR for calibration")
+@option("--calibration-lr", default=1e-4, type=float, help="LR for calibration")
 @option("--calibration-substeps", default=1, type=int, help="# of calibration substeps")
 @option(
     "--calibration-steps",
