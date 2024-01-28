@@ -30,6 +30,7 @@ from scripts.utils import kl_divergence
 )
 @option("--n-nominal", default=9, help="# of nominal examples")
 @option("--n-failure", default=2, help="# of failure examples for training")
+@option("--per-point", is_flag=True, help="If set, run with a permutation for each day")
 @option("--n-failure-eval", default=2, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
@@ -100,6 +101,7 @@ def run(
     include_cancellations,
     n_nominal,
     n_failure,
+    per_point,
     n_failure_eval,
     no_calibrate,
     regularize,
@@ -148,9 +150,16 @@ def run(
 
     # Get just the set of data we want to study
     nominal = nominal_dfs[-n_nominal:]
-    failure = disrupted_dfs[: 2 * n_failure : 2]
-    n_failure_eval = n_failure
-    failure_eval = disrupted_dfs[1 : 1 + n_failure : 2]
+
+    if not per_point:
+        failure = disrupted_dfs[: 2 * n_failure : 2]
+        n_failure_eval = n_failure
+        failure_eval = disrupted_dfs[1 : 1 + n_failure : 2]
+    else:
+        failure = disrupted_dfs[:n_failure]
+        n_failure_eval = n_failure
+        failure_eval = disrupted_dfs[:n_failure]
+        n_calibration_permutations = n_failure
 
     # Filter out cancellations if we're not using them
     if not include_cancellations:
@@ -508,7 +517,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-ablation",
+        project="wn-daily",
         name=run_name,
         group=run_name,
         config={
@@ -517,6 +526,7 @@ def run(
             "n_nominal": n_nominal,
             "n_failure": n_failure,
             "n_failure_eval": n_failure_eval,
+            "per_point": per_point,
             "no_calibrate": no_calibrate,
             "regularize": regularize,
             "wasserstein": wasserstein,
@@ -598,6 +608,7 @@ def run(
         plot_every_n=50,
         device=device,
         exclude_nominal=exclude_nominal,
+        per_point=per_point,
     )
 
 

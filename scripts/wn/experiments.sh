@@ -57,3 +57,6 @@ CUDA_VISIBLE_DEVICES=3, poetry run python scripts/wn/train.py --seed 3 --no-cali
 #     CUDA_VISIBLE_DEVICES=1, poetry run python scripts/wn/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.1 &
 #     CUDA_VISIBLE_DEVICES=2, poetry run python scripts/wn/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.01 &
 # done
+
+# # For running day-by-day analysis
+# CUDA_VISIBLE_DEVICES=1, poetry run python scripts/wn/train.py --n-nominal 5 --n-failure 5 --per-point --n-steps 500 --run-prefix daily

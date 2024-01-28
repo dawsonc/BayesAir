@@ -42,6 +42,7 @@ def train(
     plot_every_n=10,
     device=None,
     exclude_nominal=False,
+    per_point=False,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
@@ -90,6 +91,8 @@ def train(
         device: device to use for training
         exclude_nominal: if True, exclude the nominal data from the failure model
             training
+        per_point: if True, instead of drawing permutations with multiple points, make
+            one permutation for each data point
     """
     if device is None:
         device = nominal_observations.device
@@ -128,8 +131,19 @@ def train(
     for i in range(2, calibration_num_permutations):
         failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
 
+    # If we're doing per-point permutations, assign one point to each permutation
+    # overwriting the previous permutations
+    if per_point:
+        assert n_failure == calibration_num_permutations, (
+            "Need the number of permutations to be equal to the number of data points "
+            "for per-point permutations"
+        )
+        failure_permutations = []
+        for i in range(n_failure):
+            failure_permutations.append(torch.tensor([i]))
+
     # Add the permutations to a wandb table
-    if calibrate:
+    if calibrate and not per_point:
         columns = [f"Permutation member {i}" for i in range(n_failure // 2)]
         data = [
             failure_permutation.cpu().tolist()
