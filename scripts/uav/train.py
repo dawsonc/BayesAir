@@ -24,16 +24,16 @@ from scripts.utils import kl_divergence
 @option("--ablation", is_flag=True, help="If true, set project label to ablation")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=200, type=int, help="# of steps")
+@option("--n-steps", default=1000, type=int, help="# of steps")
 @option("--lr", default=1e-2, type=float, help="Learning rate")
-@option("--lr-gamma", default=1.0, type=float, help="Learning rate decay")
-@option("--lr-steps", default=1000, type=int, help="Steps per learning rate decay")
+@option("--lr-gamma", default=0.1, type=float, help="Learning rate decay")
+@option("--lr-steps", default=250, type=int, help="Steps per learning rate decay")
 @option("--grad-clip", default=10, type=float, help="Gradient clipping value")
 @option("--weight-decay", default=0.0, type=float, help="Weight decay rate")
 @option("--run-prefix", default="", help="Prefix for run name")
 @option(
     "--n-elbo-particles",
-    default=10,
+    default=1,
     type=int,
     help="# of particles for ELBO estimation",
 )
@@ -304,7 +304,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project=f"uav-{'ablation' if ablation else '1'}",
+        project=f"uav-{'ablation' if ablation else '2'}",
         name=run_name,
         group=run_name,
         config={
