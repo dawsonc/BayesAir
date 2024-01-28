@@ -231,7 +231,7 @@ def run(
             elbo += (model_logprob - posterior_logprob) / n_elbo_particles
 
         # Make it negative to make it a loss and scale by the dimension
-        return -elbo / initial_states.shape[0]
+        return -elbo  # / initial_states.shape[0]
 
     def divergence_fn(p, q):
         """Compute the KL divergence"""
@@ -304,7 +304,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project=f"uav-{'ablation' if ablation else '2'}",
+        project=f"uav-{'ablation' if ablation else '3'}",
         name=run_name,
         group=run_name,
         config={
