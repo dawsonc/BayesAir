@@ -157,8 +157,8 @@ def run(
         failure_eval = disrupted_dfs[1 : 1 + n_failure : 2]
     else:
         failure = disrupted_dfs[:n_failure]
-        n_failure_eval = n_failure
-        failure_eval = disrupted_dfs[:n_failure]
+        n_failure_eval = 1
+        failure_eval = disrupted_dfs[:n_failure_eval]
         n_calibration_permutations = n_failure
 
     # Filter out cancellations if we're not using them
