@@ -207,7 +207,7 @@ def run(
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
     wandb.init(
-        project="mnist-1",
+        project="mnist-4",
         name=run_name,
         group=run_name,
         config={
@@ -290,7 +290,7 @@ def run(
         calibration_lr=calibration_lr,
         calibration_substeps=calibration_substeps,
         calibration_steps=calibration_steps,
-        plot_every_n=100,
+        plot_every_n=200,
         exclude_nominal=exclude_nominal,
     )
 
