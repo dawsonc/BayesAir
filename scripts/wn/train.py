@@ -517,7 +517,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-daily",
+        project="wn-ablation",
         name=run_name,
         group=run_name,
         config={

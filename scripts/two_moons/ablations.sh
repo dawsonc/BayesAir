@@ -1,13 +1,21 @@
 # Run ablation experiments for the toy problem
 
+# Ours
+for seed in 0 1 2 3; do
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --seed $seed &
+done
+
 # Hold label constant
 for seed in 0 1 2 3; do
     CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --calibration-lr 0.0 --seed $seed &
 done
 
-# wait;
-
 # Don't learn nominal
 for seed in 0 1 2 3; do
-    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --exclude-nominal --seed $seed &
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --calibration-lr 0.0 --exclude-nominal --seed $seed &
+done
+
+# Don't subsample
+for seed in 0 1 2 3; do
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --calibration-lr 0.0 --exclude-nominal --no-calibrate --seed $seed &
 done
