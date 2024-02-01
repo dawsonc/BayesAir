@@ -15,9 +15,9 @@ from scripts.utils import kl_divergence
 
 
 @command()
-@option("--n-nominal", default=500, help="# of nominal examples")
-@option("--n-failure", default=5, help="# of failure examples for training")
-@option("--n-failure-eval", default=500, help="# of failure examples for evaluation")
+@option("--n-nominal", default=100, help="# of nominal examples")
+@option("--n-failure", default=10, help="# of failure examples for training")
+@option("--n-failure-eval", default=100, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
@@ -207,7 +207,7 @@ def run(
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
     wandb.init(
-        project="mnist-4",
+        project="mnist-5",
         name=run_name,
         group=run_name,
         config={

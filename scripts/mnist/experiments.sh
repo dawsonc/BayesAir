@@ -18,11 +18,11 @@ for seed in 0 1 2 3; do
     CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate &
 done
 
-wait;
+# wait;
 
-# Baseline: W2-regularized normalizing flow (RNODE)
-for seed in 0 1 2 3; do
-    CUDA_VISIBLE_DEVICES=0, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 1.0 &
-    CUDA_VISIBLE_DEVICES=2, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.1 &
-    CUDA_VISIBLE_DEVICES=3, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.01 &
-done
+# # Baseline: W2-regularized normalizing flow (RNODE)
+# for seed in 0 1 2 3; do
+#     CUDA_VISIBLE_DEVICES=0, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 1.0 &
+#     CUDA_VISIBLE_DEVICES=2, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.1 &
+#     CUDA_VISIBLE_DEVICES=3, poetry run python scripts/mnist/train.py --seed $seed --no-calibrate --regularize --wasserstein --regularization-weight 0.01 &
+# done
