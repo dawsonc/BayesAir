@@ -1,4 +1,5 @@
 """Implement CalVI training for the UAV problem."""
+
 import os
 
 import matplotlib
@@ -31,6 +32,7 @@ from scripts.utils import kl_divergence
 @option("--grad-clip", default=10, type=float, help="Gradient clipping value")
 @option("--weight-decay", default=0.0, type=float, help="Weight decay rate")
 @option("--run-prefix", default="", help="Prefix for run name")
+@option("--project-suffix", default="benchmark", help="Suffix for project name")
 @option(
     "--n-elbo-particles",
     default=1,
@@ -94,6 +96,7 @@ def run(
     grad_clip,
     weight_decay,
     run_prefix,
+    project_suffix,
     n_elbo_particles,
     n_calibration_particles,
     n_calibration_permutations,
@@ -304,7 +307,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project=f"uav-{'ablation-2' if ablation else '3'}",
+        project=f"uav-{project_suffix}",
         name=run_name,
         group=run_name,
         config={

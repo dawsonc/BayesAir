@@ -1,4 +1,5 @@
 """Implement the training loop for our method and baselines."""
+
 import torch
 from tqdm import tqdm
 
@@ -124,12 +125,16 @@ def train(
     # Create the permutations for training the calibrated model
     failure_permutations = []
     # Make sure the first two permutations cover the data
-    assert calibration_num_permutations >= 2, "Need at least two permutations"
-    first_permutation = torch.randperm(n_failure)
-    failure_permutations.append(first_permutation[: n_failure // 2])
-    failure_permutations.append(first_permutation[-(n_failure // 2) :])
-    for i in range(2, calibration_num_permutations):
-        failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
+    if calibration_num_permutations <= 0:
+        raise ValueError("Number of permutations must be positive")
+    if calibration_num_permutations == 1:
+        failure_permutations.append(torch.randperm(n_failure))
+    else:
+        first_permutation = torch.randperm(n_failure)
+        failure_permutations.append(first_permutation[: n_failure // 2])
+        failure_permutations.append(first_permutation[-(n_failure // 2) :])
+        for i in range(2, calibration_num_permutations):
+            failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
 
     # If we're doing per-point permutations, assign one point to each permutation
     # overwriting the previous permutations
@@ -144,7 +149,11 @@ def train(
 
     # Add the permutations to a wandb table
     if calibrate and not per_point:
-        columns = [f"Permutation member {i}" for i in range(n_failure // 2)]
+        if calibration_num_permutations >= 2:
+            columns = [f"Permutation member {i}" for i in range(n_failure // 2)]
+        else:
+            columns = [f"Permutation member {i}" for i in range(n_failure)]
+
         data = [
             failure_permutation.cpu().tolist()
             for failure_permutation in failure_permutations
@@ -286,12 +295,16 @@ def train(
                     save_wandb=True,
                 )
 
-                plot_posterior_grid(
-                    failure_guide,
-                    torch.zeros(calibration_num_permutations).to(device),
-                    save_file_name=None,
-                    save_wandb=True,
-                )
+                if (
+                    calibration_num_permutations > 1
+                    and calibration_num_permutations <= 8
+                ):
+                    plot_posterior_grid(
+                        failure_guide,
+                        torch.zeros(calibration_num_permutations).to(device),
+                        save_file_name=None,
+                        save_wandb=True,
+                    )
 
             torch.save(
                 {

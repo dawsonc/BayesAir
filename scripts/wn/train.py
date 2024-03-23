@@ -1,4 +1,5 @@
 """Implement CalVI training for the southwest network problem."""
+
 import datetime
 import os
 from itertools import combinations
@@ -43,6 +44,7 @@ from scripts.utils import kl_divergence
 @option("--grad-clip", default=100, type=float, help="Gradient clipping value")
 @option("--weight-decay", default=0.0, type=float, help="Weight decay rate")
 @option("--run-prefix", default="", help="Prefix for run name")
+@option("--project-suffix", default="benchmark", help="Suffix for project name")
 @option(
     "--n-elbo-particles",
     default=1,
@@ -114,6 +116,7 @@ def run(
     grad_clip,
     weight_decay,
     run_prefix,
+    project_suffix,
     n_elbo_particles,
     n_calibration_particles,
     n_calibration_permutations,
@@ -248,24 +251,24 @@ def run(
         # Map to sample sites in the model
         conditioning_dict = {}
         for i, code in enumerate(airport_codes):
-            conditioning_dict[
-                f"{code}_mean_turnaround_time"
-            ] = airport_turnaround_times[:, i]
+            conditioning_dict[f"{code}_mean_turnaround_time"] = (
+                airport_turnaround_times[:, i]
+            )
             conditioning_dict[f"{code}_mean_service_time"] = airport_service_times[:, i]
             if include_cancellations:
-                conditioning_dict[
-                    f"{code}_log_initial_available_aircraft"
-                ] = log_airport_initial_available_aircraft[:, i]
-                conditioning_dict[
-                    f"{code}_base_cancel_logprob"
-                ] = log_airport_base_cancel_prob[:, i]
+                conditioning_dict[f"{code}_log_initial_available_aircraft"] = (
+                    log_airport_initial_available_aircraft[:, i]
+                )
+                conditioning_dict[f"{code}_base_cancel_logprob"] = (
+                    log_airport_base_cancel_prob[:, i]
+                )
 
         for i, origin in enumerate(airport_codes):
             for j, destination in enumerate(airport_codes):
                 if origin != destination:
-                    conditioning_dict[
-                        f"travel_time_{origin}_{destination}"
-                    ] = travel_times[:, i, j]
+                    conditioning_dict[f"travel_time_{origin}_{destination}"] = (
+                        travel_times[:, i, j]
+                    )
 
         # Remove the batch dimension if it wasn't there before
         if single_sample:
@@ -517,7 +520,7 @@ def run(
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project="wn-ablation",
+        project=f"wn-{project_suffix}",
         name=run_name,
         group=run_name,
         config={
