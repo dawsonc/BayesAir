@@ -12,7 +12,7 @@ from click import command, option
 import wandb
 from scripts.swi.model import NX_COARSE, NY_COARSE, seismic_model
 from scripts.training import train
-from scripts.utils import kl_divergence
+from scripts.utils import kl_divergence, ConditionalGaussianMixture
 
 
 @command()
@@ -22,6 +22,7 @@ from scripts.utils import kl_divergence
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
+@option("--gmm", is_flag=True, help="Use GMM instead of NF")
 @option("--seed", default=0, help="Random seed")
 @option("--n-steps", default=500, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
@@ -85,6 +86,7 @@ def run(
     no_calibrate,
     regularize,
     wasserstein,
+    gmm,
     seed,
     n_steps,
     lr,
@@ -185,28 +187,46 @@ def run(
             )
         failure_observations_eval = torch.cat(failure_observations_eval)
 
+        n_nominal_eval = n_failure_eval
+        profile_nominal_eval = profile_background.expand(n_nominal_eval, -1, -1).clone()
+        profile_nominal_eval[:, 3:6, 1:9] = 1.0
+        profile_nominal_eval += 0.3 * torch.randn_like(profile_nominal_eval)
+
+        nominal_observations_eval = []
+        for i in range(n_nominal_eval):
+            nominal_model = pyro.poutine.condition(
+                seismic_model, data={"profile": profile_nominal_eval[i]}
+            )
+            nominal_observations_eval.append(
+                nominal_model(
+                    N=1, observation_noise_scale=observation_noise_scale, device=device
+                )
+            )
+        nominal_observations_eval = torch.cat(nominal_observations_eval)
+
     # Vary the seed for training
     torch.manual_seed(seed)
     pyro.set_rng_seed(seed)
 
     # Make the objective and divergence closures
+    def single_particle_elbo(guide_dist, n, obs):
+        posterior_sample, posterior_logprob = guide_dist.rsample_and_log_prob()
+
+        # Reshape the sample
+        posterior_sample = posterior_sample.reshape(NY_COARSE, NX_COARSE)
+
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.condition(seismic_model, data={"profile": posterior_sample})
+        ).get_trace(N=n, receiver_observations=obs, device=obs.device)
+        model_logprob = model_trace.log_prob_sum()
+
+        return model_logprob - posterior_logprob
+
     def objective_fn(guide_dist, n, obs):
         """ELBO loss for the seismic waveform inversion problem."""
         elbo = torch.tensor(0.0).to(obs.device)
         for _ in range(n_elbo_particles):
-            posterior_sample, posterior_logprob = guide_dist.rsample_and_log_prob()
-
-            # Reshape the sample
-            posterior_sample = posterior_sample.reshape(NY_COARSE, NX_COARSE)
-
-            model_trace = pyro.poutine.trace(
-                pyro.poutine.condition(
-                    seismic_model, data={"profile": posterior_sample}
-                )
-            ).get_trace(N=n, receiver_observations=obs, device=obs.device)
-            model_logprob = model_trace.log_prob_sum()
-
-            elbo += (model_logprob - posterior_logprob) / n_elbo_particles
+            elbo += single_particle_elbo(guide_dist, n, obs) / n_elbo_particles
 
         # Make it negative to make it a loss and scale by the dimension
         return -elbo / (NY_COARSE * NX_COARSE)
@@ -214,6 +234,31 @@ def run(
     def divergence_fn(p, q):
         """Compute the KL divergence"""
         return kl_divergence(p, q, n_divergence_particles)
+
+    # Also make a closure for classifying anomalies
+    def score_fn(nominal_guide_dist, failure_guide_dist, n, obs):
+        scores = torch.zeros(n).to(obs.device)
+
+        n_samples = 10
+        for i in range(n):
+            # nominal_elbo = torch.tensor(0.0).to(obs.device)
+            # for _ in range(n_samples):
+            #     nominal_elbo += (
+            #         single_particle_elbo(nominal_guide_dist, 1, obs[i].unsqueeze(0))
+            #         / n_samples
+            #     )
+
+            failure_elbo = torch.tensor(0.0).to(obs.device)
+            for _ in range(n_samples):
+                failure_elbo += (
+                    single_particle_elbo(failure_guide_dist, 1, obs[i].unsqueeze(0))
+                    / n_samples
+                )
+
+            # scores[i] = failure_elbo - nominal_elbo
+            scores[i] = failure_elbo * 1e-3
+
+        return scores
 
     # Define plotting callbacks
     @torch.no_grad()
@@ -276,6 +321,7 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else ""
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
@@ -312,7 +358,7 @@ def run(
     )
 
     # Make a directory for checkpoints if it doesn't already exist
-    os.makedirs(f"checkpoints/swi/{run_name}", exist_ok=True)
+    os.makedirs(f"checkpoints/swi/{run_name}_{seed}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:
@@ -320,6 +366,11 @@ def run(
             features=NY_COARSE * NX_COARSE,
             context=n_calibration_permutations,
             hidden_features=(64, 64),
+        ).to(device)
+    elif gmm:
+        failure_guide = ConditionalGaussianMixture(
+            n_context=n_calibration_permutations,
+            n_features=NY_COARSE * NX_COARSE,
         ).to(device)
     else:
         failure_guide = zuko.flows.NSF(
@@ -335,6 +386,8 @@ def run(
         failure_guide=failure_guide,
         n_failure=n_failure,
         failure_observations=failure_observations,
+        n_nominal_eval=n_nominal_eval,
+        nominal_observations_eval=nominal_observations_eval,
         n_failure_eval=n_failure_eval,
         failure_observations_eval=failure_observations_eval,
         failure_posterior_samples_eval=profile_failure_eval.reshape(
@@ -347,7 +400,7 @@ def run(
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,
         plot_posterior_grid=plot_posterior_grid,
-        name="swi/" + run_name,
+        name="swi/" + run_name + f"_{seed}",
         calibrate=calibrate,
         regularize=regularize,
         num_steps=n_steps,
@@ -367,6 +420,7 @@ def run(
         calibration_substeps=calibration_substeps,
         plot_every_n=n_steps,
         exclude_nominal=exclude_nominal,
+        score_fn=score_fn,
     )
 
 

@@ -240,7 +240,7 @@ def run(
     )
 
     # Make a directory for checkpoints if it doesn't already exist
-    os.makedirs(f"checkpoints/mnist/{run_name}", exist_ok=True)
+    os.makedirs(f"checkpoints/mnist/{run_name}_{seed}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:

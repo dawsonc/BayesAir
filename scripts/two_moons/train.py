@@ -12,7 +12,7 @@ from click import command, option
 import wandb
 from scripts.training import train
 from scripts.two_moons.model import generate_two_moons_data
-from scripts.utils import kl_divergence
+from scripts.utils import kl_divergence, ConditionalGaussianMixture
 
 
 @command()
@@ -22,6 +22,7 @@ from scripts.utils import kl_divergence
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
+@option("--gmm", is_flag=True, help="Use GMM instead of NF")
 @option("--seed", default=0, help="Random seed")
 @option("--n-steps", default=200, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
@@ -85,6 +86,7 @@ def run(
     no_calibrate,
     regularize,
     wasserstein,
+    gmm,
     seed,
     n_steps,
     lr,
@@ -127,6 +129,10 @@ def run(
         failure_samples_eval = generate_two_moons_data(
             n_failure_eval, device, failure=True
         )
+        n_nominal_eval = n_failure_eval
+        nominal_samples_eval = generate_two_moons_data(
+            n_nominal_eval, device, failure=False
+        )
 
     # Change seed for training
     torch.manual_seed(seed)
@@ -142,6 +148,14 @@ def run(
     def divergence_fn(p, q):
         """Compute the KL divergence"""
         return kl_divergence(p, q, n_divergence_particles)
+
+    # Also make a closure for classifying anomalies
+    def score_fn(nominal_guide_dist, failure_guide_dist, n, obs):
+        # Score function is the log likelihood ratio
+        failure_likelihood = failure_guide_dist.log_prob(obs)
+        nominal_likelihood = nominal_guide_dist.log_prob(obs)
+        scores = failure_likelihood - nominal_likelihood
+        return scores
 
     # Define plotting callbacks
     @torch.no_grad()
@@ -216,6 +230,7 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else "uncalibrated_"
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
@@ -252,12 +267,16 @@ def run(
     )
 
     # Make a directory for checkpoints if it doesn't already exist
-    os.makedirs(f"checkpoints/two_moons/{run_name}", exist_ok=True)
+    os.makedirs(f"checkpoints/two_moons/{run_name}_{seed}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:
         failure_guide = zuko.flows.CNF(
             features=2, context=n_calibration_permutations, hidden_features=(128, 128)
+        ).to(device)
+    elif gmm:
+        failure_guide = ConditionalGaussianMixture(
+            n_context=n_calibration_permutations, n_features=2
         ).to(device)
     else:
         failure_guide = zuko.flows.NSF(
@@ -271,6 +290,8 @@ def run(
         failure_guide=failure_guide,
         n_failure=n_failure,
         failure_observations=failure_samples,
+        n_nominal_eval=n_nominal_eval,
+        nominal_observations_eval=nominal_samples_eval,
         n_failure_eval=n_failure_eval,
         failure_observations_eval=failure_samples_eval,
         failure_posterior_samples_eval=failure_samples_eval,
@@ -279,7 +300,7 @@ def run(
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,
         plot_posterior_grid=plot_posterior_grid,
-        name="two_moons/" + run_name,
+        name="two_moons/" + run_name + f"_{seed}",
         calibrate=calibrate,
         regularize=regularize,
         num_steps=n_steps,
@@ -299,6 +320,7 @@ def run(
         calibration_substeps=calibration_substeps,
         plot_every_n=n_steps,
         exclude_nominal=exclude_nominal,
+        score_fn=score_fn,
     )
 
     wandb.finish()

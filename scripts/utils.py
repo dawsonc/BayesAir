@@ -1,8 +1,19 @@
 """Define useful functions"""
+from typing import Any
+
 import numpy as np
 import ot
 import torch
-from torchmetrics.classification import BinaryF1Score
+import pyro.distributions as dist
+from torchmetrics.classification import (
+    BinaryF1Score,
+    BinaryAUROC,
+    BinaryAveragePrecision,
+    BinaryPrecision,
+    BinaryRecall,
+    BinaryROC,
+)
+from zuko.flows.core import LazyDistribution
 
 
 def kl_divergence(p_dist, q_dist, num_particles=10):
@@ -59,6 +70,26 @@ def sinkhorn(p_samples, q_samples, epsilon=1.0):
     # Solve regularized EMD (sinkhorn)
     sinkhorn_dist = ot.sinkhorn2(a, b, M, epsilon, method="sinkhorn_log")
     return sinkhorn_dist
+
+
+def anomaly_classifier_metrics(scores, labels):
+    """Compute classification metrics (e.g. AUCROC and AUCPR)."""
+    aucroc = BinaryAUROC().to(scores.device)(scores, labels)
+    aucpr = BinaryAveragePrecision().to(scores.device)(scores, labels)
+
+    # Compute the optimal decision threshold using the receiver operating curve
+    fpr, tpr, thresholds = BinaryROC().to(scores.device)(scores, labels)
+    optimal_idx = torch.argmax(tpr - fpr)
+    optimal_threshold = thresholds[optimal_idx]
+
+    precision = BinaryPrecision(threshold=optimal_threshold.item()).to(scores.device)(
+        scores, labels
+    )
+    recall = BinaryRecall(threshold=optimal_threshold.item()).to(scores.device)(
+        scores, labels
+    )
+
+    return aucroc, aucpr, precision, recall
 
 
 class RBF(torch.nn.Module):
@@ -121,6 +152,57 @@ class ContextFreeBase(torch.nn.Module):
 
     def forward(self, _):
         return self.base()
+
+
+class MixtureOfDiagNormals(dist.MixtureOfDiagNormals):
+    def rsample_and_log_prob(self, sample_shape=torch.Size()):
+        """
+        Returns a sample and the log probability of the sample.
+
+        Arguments:
+            sample_shape: Shape of the sample.
+
+        Returns:
+            A sample and the log probability of the sample.
+        """
+        sample = self.rsample(sample_shape)
+        log_prob = self.log_prob(sample)
+
+        return sample, log_prob
+
+
+class ConditionalGaussianMixture(LazyDistribution):
+    def __init__(self, n_context: int, n_features: int):
+        super().__init__()
+        self.n_context = n_context
+        self.n_features = n_features
+
+        self.means = torch.nn.Parameter(torch.randn(n_context + 1, n_features))
+        self.log_vars = torch.nn.Parameter(torch.randn(n_context + 1, n_features))
+
+    def forward(self, c: Any = None) -> torch.distributions.Distribution:
+        r"""
+        Arguments:
+            c: A context :math:`c`.
+
+        Returns:
+            A distribution :math:`p(X | c)`.
+        """
+        if c is None:
+            c = torch.zero(self.n_context).to(self.means.device)
+
+        # Add a leading zero to the context
+        c = torch.cat([torch.zeros(*c.shape[:-1], 1).to(c.device), c], dim=-1)
+
+        # Wherever the row is all zero, make just the first element 1
+        zero_rows = c.sum(dim=-1) == 0
+        c[zero_rows, 0] = 1.0
+
+        return MixtureOfDiagNormals(
+            locs=self.means,
+            coord_scale=torch.exp(self.log_vars).sqrt(),
+            component_logits=c,
+        )
 
 
 if __name__ == "__main__":

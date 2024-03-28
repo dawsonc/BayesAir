@@ -4,7 +4,7 @@ import torch
 from tqdm import tqdm
 
 import wandb
-from scripts.utils import cross_entropy, f_score, simple_mmd
+from scripts.utils import cross_entropy, f_score, simple_mmd, anomaly_classifier_metrics
 
 
 def train(
@@ -13,6 +13,8 @@ def train(
     failure_guide,
     n_failure,
     failure_observations,
+    n_nominal_eval,
+    nominal_observations_eval,
     n_failure_eval,
     failure_observations_eval,
     failure_posterior_samples_eval,
@@ -44,6 +46,7 @@ def train(
     device=None,
     exclude_nominal=False,
     per_point=False,
+    score_fn=False,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
@@ -94,6 +97,8 @@ def train(
             training
         per_point: if True, instead of drawing permutations with multiple points, make
             one permutation for each data point
+        score_fn: if True, use this function to score the probability of points being
+            anomalies or not
     """
     if device is None:
         device = nominal_observations.device
@@ -341,61 +346,90 @@ def train(
                         failure_dist,
                     )
 
-        wandb.log(
-            {
-                "Failure/ELBO": failure_elbo.detach().cpu().item(),
-                "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
-                "Failure/MMD (eval)": mmd
-                if failure_posterior_samples_eval is not None
-                else None,
-                "Failure/F score (eval)": f_score_eval
-                if failure_posterior_samples_eval is not None
-                and nominal_posterior_samples_eval is not None
-                else None,
-                "Failure/CE (eval)": ce
-                if failure_posterior_samples_eval is not None
-                else None,
-                "Failure/loss": failure_loss.detach().cpu().item(),
-                "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
-            }
-            # | (
-            #     {
-            #         "Failure/mean calibration error": mean_calibration_error.detach()
-            #         .cpu()
-            #         .item(),
-            #     }
-            #     if calibrate
-            #     else {}
-            # )
-            | (
+            log_packet = (
                 {
-                    "Failure/ELBO (calibrated)": mixture_label_loss.detach()
-                    .cpu()
-                    .item(),
-                    "Failure/mixture grad norm": mixture_grad_norm.detach()
-                    .cpu()
-                    .item(),
+                    "Failure/ELBO": failure_elbo.detach().cpu().item(),
+                    "Failure/ELBO (eval)": failure_objective_eval.detach().cpu().item(),
+                    "Failure/MMD (eval)": mmd
+                    if failure_posterior_samples_eval is not None
+                    else None,
+                    "Failure/F score (eval)": f_score_eval
+                    if failure_posterior_samples_eval is not None
+                    and nominal_posterior_samples_eval is not None
+                    else None,
+                    "Failure/CE (eval)": ce
+                    if failure_posterior_samples_eval is not None
+                    else None,
+                    "Failure/loss": failure_loss.detach().cpu().item(),
+                    "Failure/gradient norm": failure_grad_norm.detach().cpu().item(),
                 }
-                if calibrate
-                else {}
+                | (
+                    {
+                        "Failure/ELBO (calibrated)": mixture_label_loss.detach()
+                        .cpu()
+                        .item(),
+                        "Failure/mixture grad norm": mixture_grad_norm.detach()
+                        .cpu()
+                        .item(),
+                    }
+                    if calibrate
+                    else {}
+                )
+                | (
+                    {
+                        "Failure/regularization KL": regularization_kl.detach()
+                        .cpu()
+                        .item(),
+                    }
+                    if regularize and not wasserstein_regularization
+                    else {}
+                )
+                | (
+                    {
+                        "Failure/mean square flow": mean_square_flow.detach()
+                        .cpu()
+                        .item(),
+                    }
+                    if regularize and wasserstein_regularization
+                    else {}
+                )
             )
-            | (
-                {
-                    "Failure/regularization KL": regularization_kl.detach()
-                    .cpu()
-                    .item(),
-                }
-                if regularize and not wasserstein_regularization
-                else {}
-            )
-            | (
-                {
-                    "Failure/mean square flow": mean_square_flow.detach().cpu().item(),
-                }
-                if regularize and wasserstein_regularization
-                else {}
-            )
-        )
+
+            if score_fn is not None and i == num_steps - 1:
+                failure_scores = score_fn(
+                    nominal_dist,
+                    failure_dist,
+                    n_failure_eval,
+                    failure_observations_eval,
+                )
+                nominal_scores = score_fn(
+                    nominal_dist,
+                    failure_dist,
+                    n_nominal_eval,
+                    nominal_observations_eval,
+                )
+                labels = (
+                    torch.cat([torch.zeros(n_nominal_eval), torch.ones(n_failure_eval)])
+                    .to(device)
+                    .to(torch.int32)
+                )
+                scores = torch.cat([nominal_scores, failure_scores])
+                aucroc, aucpr, precision, recall = anomaly_classifier_metrics(
+                    scores, labels
+                )
+
+                log_packet = log_packet | (
+                    {
+                        "Anomaly Classifier/AUCROC": aucroc.detach().cpu().item(),
+                        "Anomaly Classifier/AUCPR": aucpr.detach().cpu().item(),
+                        "Anomaly Classifier/Precision": precision.detach().cpu().item(),
+                        "Anomaly Classifier/Recall": recall.detach().cpu().item(),
+                    }
+                    if score_fn is not None
+                    else {}
+                )
+
+        wandb.log(log_packet)
 
     # Save the model to wandb
     wandb.save(f"checkpoints/{name}/failure_checkpoint_{num_steps - 1}.pt")

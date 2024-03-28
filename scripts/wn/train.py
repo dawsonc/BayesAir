@@ -19,7 +19,7 @@ from bayes_air.model import air_traffic_network_model
 from bayes_air.network import NetworkState
 from bayes_air.schedule import parse_schedule
 from scripts.training import train
-from scripts.utils import kl_divergence
+from scripts.utils import kl_divergence, ConditionalGaussianMixture
 
 
 @command()
@@ -36,6 +36,7 @@ from scripts.utils import kl_divergence
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
+@option("--gmm", is_flag=True, help="Use GMM instead of NF")
 @option("--seed", default=0, help="Random seed")
 @option("--n-steps", default=300, type=int, help="# of steps")
 @option("--lr", default=1e-3, type=float, help="Learning rate")
@@ -108,6 +109,7 @@ def run(
     no_calibrate,
     regularize,
     wasserstein,
+    gmm,
     seed,
     n_steps,
     lr,
@@ -153,6 +155,7 @@ def run(
 
     # Get just the set of data we want to study
     nominal = nominal_dfs[-n_nominal:]
+    nominal_eval = nominal_dfs[:n_nominal]
 
     if not per_point:
         failure = disrupted_dfs[: 2 * n_failure : 2]
@@ -167,11 +170,13 @@ def run(
     # Filter out cancellations if we're not using them
     if not include_cancellations:
         nominal = [df[~df["cancelled"]] for df in nominal]
+        nominal_eval = [df[~df["cancelled"]] for df in nominal_eval]
         failure = [df[~df["cancelled"]] for df in failure]
         failure_eval = [df[~df["cancelled"]] for df in failure_eval]
 
     # Convert each day into a schedule
     nominal_states = []
+    nominal_eval_states = []
     failure_states = []
     failure_eval_states = []
 
@@ -183,6 +188,15 @@ def run(
             pending_flights=flights,
         )
         nominal_states.append(state)
+
+    for day_df in nominal_eval:
+        flights, airports = parse_schedule(day_df, device=device)
+
+        state = NetworkState(
+            airports={airport.code: airport for airport in airports},
+            pending_flights=flights,
+        )
+        nominal_eval_states.append(state)
 
     for day_df in failure:
         flights, airports = parse_schedule(day_df, device=device)
@@ -251,24 +265,24 @@ def run(
         # Map to sample sites in the model
         conditioning_dict = {}
         for i, code in enumerate(airport_codes):
-            conditioning_dict[f"{code}_mean_turnaround_time"] = (
-                airport_turnaround_times[:, i]
-            )
+            conditioning_dict[
+                f"{code}_mean_turnaround_time"
+            ] = airport_turnaround_times[:, i]
             conditioning_dict[f"{code}_mean_service_time"] = airport_service_times[:, i]
             if include_cancellations:
-                conditioning_dict[f"{code}_log_initial_available_aircraft"] = (
-                    log_airport_initial_available_aircraft[:, i]
-                )
-                conditioning_dict[f"{code}_base_cancel_logprob"] = (
-                    log_airport_base_cancel_prob[:, i]
-                )
+                conditioning_dict[
+                    f"{code}_log_initial_available_aircraft"
+                ] = log_airport_initial_available_aircraft[:, i]
+                conditioning_dict[
+                    f"{code}_base_cancel_logprob"
+                ] = log_airport_base_cancel_prob[:, i]
 
         for i, origin in enumerate(airport_codes):
             for j, destination in enumerate(airport_codes):
                 if origin != destination:
-                    conditioning_dict[f"travel_time_{origin}_{destination}"] = (
-                        travel_times[:, i, j]
-                    )
+                    conditioning_dict[
+                        f"travel_time_{origin}_{destination}"
+                    ] = travel_times[:, i, j]
 
         # Remove the batch dimension if it wasn't there before
         if single_sample:
@@ -279,27 +293,29 @@ def run(
         return conditioning_dict
 
     # Make the objective and divergence closures
+
+    def single_particle_elbo(guide_dist, states):
+        posterior_sample, posterior_logprob = guide_dist.rsample_and_log_prob()
+
+        conditioning_dict = map_to_sample_sites(posterior_sample)
+
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.condition(air_traffic_network_model, data=conditioning_dict)
+        ).get_trace(
+            states=states,
+            delta_t=dt,
+            device=device,
+            include_cancellations=include_cancellations,
+        )
+        model_logprob = model_trace.log_prob_sum()
+
+        return model_logprob - posterior_logprob
+
     def objective_fn(guide_dist, _, states):
         """ELBO loss for the air traffic problem."""
         elbo = torch.tensor(0.0).to(device)
         for _ in range(n_elbo_particles):
-            posterior_sample, posterior_logprob = guide_dist.rsample_and_log_prob()
-
-            conditioning_dict = map_to_sample_sites(posterior_sample)
-
-            model_trace = pyro.poutine.trace(
-                pyro.poutine.condition(
-                    air_traffic_network_model, data=conditioning_dict
-                )
-            ).get_trace(
-                states=states,
-                delta_t=dt,
-                device=device,
-                include_cancellations=include_cancellations,
-            )
-            model_logprob = model_trace.log_prob_sum()
-
-            elbo += (model_logprob - posterior_logprob) / n_elbo_particles
+            elbo += single_particle_elbo(guide_dist, states) / n_elbo_particles
 
         # Make it negative to make it a loss and scale by the number of flights
         num_flights = sum(len(state.pending_flights) for state in states)
@@ -308,6 +324,30 @@ def run(
     def divergence_fn(p, q):
         """Compute the KL divergence"""
         return kl_divergence(p, q, n_divergence_particles)
+
+    # Also make a closure for classifying anomalies
+    def score_fn(nominal_guide_dist, failure_guide_dist, n, obs):
+        scores = torch.zeros(n).to(device)
+
+        n_samples = 10
+        for i in range(len(obs)):
+            # nominal_elbo = torch.tensor(0.0).to(device)
+            # for _ in range(n_samples):
+            #     nominal_elbo += (
+            #         single_particle_elbo(nominal_guide_dist, [obs[i]])
+            #         / n_samples
+            #     )
+
+            failure_elbo = torch.tensor(0.0).to(device)
+            for _ in range(n_samples):
+                failure_elbo += (
+                    single_particle_elbo(failure_guide_dist, [obs[i]]) / n_samples
+                )
+
+            # scores[i] = failure_elbo - nominal_elbo
+            scores[i] = failure_elbo * 1e-1
+
+        return scores
 
     # Define plotting callbacks
     @torch.no_grad()
@@ -516,6 +556,7 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else ""
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
@@ -557,7 +598,8 @@ def run(
 
     # Make a directory for checkpoints if it doesn't already exist
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    os.makedirs(f"checkpoints/wn/{run_name}/{timestamp}", exist_ok=True)
+    name = f"wn/{run_name}_{seed}/{timestamp}"
+    os.makedirs(f"checkpoints/{name}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:
@@ -565,6 +607,10 @@ def run(
             features=n_latent_variables,
             context=n_calibration_permutations,
             hidden_features=(64, 64),
+        ).to(device)
+    elif gmm:
+        failure_guide = ConditionalGaussianMixture(
+            n_context=n_calibration_permutations, n_features=2
         ).to(device)
     else:
         failure_guide = zuko.flows.NSF(
@@ -580,6 +626,8 @@ def run(
         failure_guide=failure_guide,
         n_failure=n_failure,
         failure_observations=failure_states,
+        n_nominal_eval=len(nominal_eval_states),
+        nominal_observations_eval=nominal_eval_states,
         n_failure_eval=n_failure_eval,
         failure_observations_eval=failure_eval_states,
         failure_posterior_samples_eval=None,
@@ -588,7 +636,7 @@ def run(
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,
         plot_posterior_grid=plot_posterior_grid,
-        name="wn/" + run_name + "/" + timestamp,
+        name=name,
         calibrate=calibrate,
         regularize=regularize,
         num_steps=n_steps,
@@ -612,6 +660,7 @@ def run(
         device=device,
         exclude_nominal=exclude_nominal,
         per_point=per_point,
+        score_fn=score_fn,
     )
 
 

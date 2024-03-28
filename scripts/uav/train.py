@@ -13,7 +13,7 @@ import wandb
 from scripts.training import train
 from scripts.uav.data import load_all_data
 from scripts.uav.model import model as uav_model
-from scripts.utils import kl_divergence
+from scripts.utils import kl_divergence, ConditionalGaussianMixture
 
 
 @command()
@@ -24,6 +24,7 @@ from scripts.utils import kl_divergence
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--ablation", is_flag=True, help="If true, set project label to ablation")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
+@option("--gmm", is_flag=True, help="Use GMM instead of NF")
 @option("--seed", default=0, help="Random seed")
 @option("--n-steps", default=1000, type=int, help="# of steps")
 @option("--lr", default=1e-2, type=float, help="Learning rate")
@@ -88,6 +89,7 @@ def run(
     regularize,
     ablation,
     wasserstein,
+    gmm,
     seed,
     n_steps,
     lr,
@@ -133,22 +135,39 @@ def run(
             nominal_pqrs,
             nominal_commands,
         ) = nominal_data
-        nominal_initial_states = torch.cat(nominal_initial_states)
-        nominal_next_states = torch.cat(nominal_next_states)
-        nominal_pqrs = torch.cat(nominal_pqrs)
-        nominal_commands = torch.cat(nominal_commands)
+        nominal_initial_states_train = torch.cat(nominal_initial_states[1:])
+        nominal_next_states_train = torch.cat(nominal_next_states[1:])
+        nominal_pqrs_train = torch.cat(nominal_pqrs[1:])
+        nominal_commands_train = torch.cat(nominal_commands[1:])
 
         # These are all N x 3, so stack into N x 4 x 3
         nominal_observations = torch.stack(
             (
-                nominal_initial_states,
-                nominal_next_states,
-                nominal_pqrs,
-                nominal_commands,
+                nominal_initial_states_train,
+                nominal_next_states_train,
+                nominal_pqrs_train,
+                nominal_commands_train,
             ),
             dim=1,
         )
         n_nominal = nominal_observations.shape[0]
+
+        nominal_initial_states_eval = torch.cat(nominal_initial_states[:1])
+        nominal_next_states_eval = torch.cat(nominal_next_states[:1])
+        nominal_pqrs_eval = torch.cat(nominal_pqrs[:1])
+        nominal_commands_eval = torch.cat(nominal_commands[:1])
+
+        # These are all N x 3, so stack into N x 4 x 3
+        nominal_observations_eval = torch.stack(
+            (
+                nominal_initial_states_eval,
+                nominal_next_states_eval,
+                nominal_pqrs_eval,
+                nominal_commands_eval,
+            ),
+            dim=1,
+        )
+        n_nominal_eval = nominal_observations_eval.shape[0]
 
         # Unpack failure data into tensors (concatenate trajectories)
         (
@@ -192,46 +211,49 @@ def run(
     torch.manual_seed(seed)
     pyro.set_rng_seed(seed)
 
+    def single_particle_elbo(guide_dist, n, obs):
+        posterior_sample, posterior_logprob = guide_dist.rsample_and_log_prob()
+
+        # Reshape the sample
+        A = posterior_sample[:9].reshape(3, 3)
+        K = posterior_sample[9:18].reshape(3, 3)
+        d = posterior_sample[18:21].reshape(3)
+        log_noise_strength = posterior_sample[21]
+
+        # Unpack the observations
+        initial_states = obs[:, 0]
+        next_states = obs[:, 1]
+        pqrs = obs[:, 2]
+        commands = obs[:, 3]
+
+        model_trace = pyro.poutine.trace(
+            pyro.poutine.condition(
+                uav_model,
+                data={
+                    "A": A,
+                    "K": K,
+                    "d": d,
+                    "log_noise_strength": log_noise_strength,
+                },
+            )
+        ).get_trace(
+            initial_states=initial_states,
+            commands=commands,
+            observed_next_states=next_states,
+            observed_pqrs=pqrs,
+            dt=0.25,
+            device=obs.device,
+        )
+        model_logprob = model_trace.log_prob_sum()
+
+        return model_logprob - posterior_logprob
+
     # Make the objective and divergence closures
     def objective_fn(guide_dist, n, obs):
         """ELBO loss for the seismic waveform inversion problem."""
         elbo = torch.tensor(0.0).to(obs.device)
         for _ in range(n_elbo_particles):
-            posterior_sample, posterior_logprob = guide_dist.rsample_and_log_prob()
-
-            # Reshape the sample
-            A = posterior_sample[:9].reshape(3, 3)
-            K = posterior_sample[9:18].reshape(3, 3)
-            d = posterior_sample[18:21].reshape(3)
-            log_noise_strength = posterior_sample[21]
-
-            # Unpack the observations
-            initial_states = obs[:, 0]
-            next_states = obs[:, 1]
-            pqrs = obs[:, 2]
-            commands = obs[:, 3]
-
-            model_trace = pyro.poutine.trace(
-                pyro.poutine.condition(
-                    uav_model,
-                    data={
-                        "A": A,
-                        "K": K,
-                        "d": d,
-                        "log_noise_strength": log_noise_strength,
-                    },
-                )
-            ).get_trace(
-                initial_states=initial_states,
-                commands=commands,
-                observed_next_states=next_states,
-                observed_pqrs=pqrs,
-                dt=0.25,
-                device=obs.device,
-            )
-            model_logprob = model_trace.log_prob_sum()
-
-            elbo += (model_logprob - posterior_logprob) / n_elbo_particles
+            elbo += single_particle_elbo(guide_dist, n, obs) / n_elbo_particles
 
         # Make it negative to make it a loss
         return -elbo
@@ -239,6 +261,31 @@ def run(
     def divergence_fn(p, q):
         """Compute the KL divergence"""
         return kl_divergence(p, q, n_divergence_particles)
+
+    # Also make a closure for classifying anomalies
+    def score_fn(nominal_guide_dist, failure_guide_dist, n, obs):
+        scores = torch.zeros(n).to(obs.device)
+
+        n_samples = 50
+        for i in range(n):
+            # nominal_elbo = torch.tensor(0.0).to(obs.device)
+            # for _ in range(n_samples):
+            #     nominal_elbo += (
+            #         single_particle_elbo(nominal_guide_dist, 1, obs[i].unsqueeze(0))
+            #         / n_samples
+            #     )
+
+            failure_elbo = torch.tensor(0.0).to(obs.device)
+            for _ in range(n_samples):
+                failure_elbo += (
+                    single_particle_elbo(failure_guide_dist, 1, obs[i].unsqueeze(0))
+                    / n_samples
+                )
+
+            # scores[i] = failure_elbo - nominal_elbo
+            scores[i] = failure_elbo
+
+        return scores
 
     # Define plotting callbacks
     @torch.no_grad()
@@ -303,6 +350,7 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else ""
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
@@ -339,7 +387,7 @@ def run(
     )
 
     # Make a directory for checkpoints if it doesn't already exist
-    os.makedirs(f"checkpoints/uav/{run_name}", exist_ok=True)
+    os.makedirs(f"checkpoints/uav/{run_name}_{seed}", exist_ok=True)
 
     # Initialize the models
     if wasserstein:
@@ -347,6 +395,11 @@ def run(
             features=2 * 3 * 3 + 3 + 1,
             context=n_calibration_permutations,
             hidden_features=(64, 64),
+        ).to(device)
+    elif gmm:
+        failure_guide = ConditionalGaussianMixture(
+            n_context=n_calibration_permutations,
+            n_features=2 * 3 * 3 + 3 + 1,
         ).to(device)
     else:
         failure_guide = zuko.flows.NSF(
@@ -362,6 +415,8 @@ def run(
         failure_guide=failure_guide,
         n_failure=n_failure,
         failure_observations=failure_observations_train,
+        n_nominal_eval=n_nominal_eval,
+        nominal_observations_eval=nominal_observations_eval,
         n_failure_eval=n_failure_eval,
         failure_observations_eval=failure_observations_eval,
         failure_posterior_samples_eval=None,
@@ -370,7 +425,7 @@ def run(
         divergence_fn=divergence_fn,
         plot_posterior=plot_posterior,
         plot_posterior_grid=plot_posterior_grid,
-        name="uav/" + run_name,
+        name="uav/" + run_name + f"_{seed}",
         calibrate=calibrate,
         regularize=regularize,
         num_steps=n_steps,
@@ -389,8 +444,9 @@ def run(
         calibration_lr=calibration_lr,
         calibration_substeps=calibration_substeps,
         # plot_every_n=n_steps,
-        plot_every_n=50,
+        plot_every_n=100,
         exclude_nominal=exclude_nominal,
+        score_fn=score_fn,
     )
 
 
