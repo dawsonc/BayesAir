@@ -121,6 +121,9 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import seaborn as sns
 
+    # Set seed for reproducibility
+    torch.manual_seed(0)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Define the different subsurface conditions for "nominal" and "failure"
@@ -161,7 +164,7 @@ if __name__ == "__main__":
             N=N_failure, observation_noise_scale=observation_noise_scale
         )
 
-    sns.set(style="white", context="paper", color_codes=True)
+    sns.set_theme("paper", style="white", color_codes=True)
 
     # Plot the profiles
     fig, axs = plt.subplots(2, 1, figsize=(4, 8))

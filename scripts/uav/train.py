@@ -21,12 +21,14 @@ from scripts.utils import kl_divergence, ConditionalGaussianMixture
 @option("--n-failure", default=1, help="# of failure examples for training")
 @option("--n-failure-eval", default=1, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
+@option("--balance", is_flag=True, help="Balance CalNF")
+@option("--bagged", is_flag=True, help="Bootstrap aggregation")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--ablation", is_flag=True, help="If true, set project label to ablation")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--gmm", is_flag=True, help="Use GMM instead of NF")
 @option("--seed", default=0, help="Random seed")
-@option("--n-steps", default=1000, type=int, help="# of steps")
+@option("--n-steps", default=500, type=int, help="# of steps")
 @option("--lr", default=1e-2, type=float, help="Learning rate")
 @option("--lr-gamma", default=0.1, type=float, help="Learning rate decay")
 @option("--lr-steps", default=250, type=int, help="Steps per learning rate decay")
@@ -48,7 +50,7 @@ from scripts.utils import kl_divergence, ConditionalGaussianMixture
 )
 @option(
     "--n-calibration-permutations",
-    default=5,
+    default=6,
     type=int,
     help="# of permutations for calibration",
 )
@@ -86,6 +88,8 @@ def run(
     n_failure,
     n_failure_eval,
     no_calibrate,
+    balance,
+    bagged,
     regularize,
     ablation,
     wasserstein,
@@ -350,6 +354,8 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "balanced_" if balance else ""
+    run_name += "bagged_" if bagged else ""
     run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else ""
     if regularize:
@@ -447,6 +453,8 @@ def run(
         plot_every_n=100,
         exclude_nominal=exclude_nominal,
         score_fn=score_fn,
+        balance=balance,
+        bagged=bagged,
     )
 
 

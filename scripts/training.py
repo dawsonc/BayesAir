@@ -2,9 +2,10 @@
 
 import torch
 from tqdm import tqdm
+import time
 
 import wandb
-from scripts.utils import cross_entropy, f_score, simple_mmd, anomaly_classifier_metrics
+from scripts.utils import cross_entropy, f_score, simple_mmd, anomaly_classifier_metrics, FlowEnsembleDistribution
 
 
 def train(
@@ -47,6 +48,8 @@ def train(
     exclude_nominal=False,
     per_point=False,
     score_fn=False,
+    balance=False,
+    bagged=False,
 ):
     """
     Compute the loss for the seismic waveform inversion problem.
@@ -99,6 +102,8 @@ def train(
             one permutation for each data point
         score_fn: if True, use this function to score the probability of points being
             anomalies or not
+        balance: if True, regularize between subsamples
+        bagged: if True, use bootstrap aggregation
     """
     if device is None:
         device = nominal_observations.device
@@ -135,11 +140,14 @@ def train(
     if calibration_num_permutations == 1:
         failure_permutations.append(torch.randperm(n_failure))
     else:
-        first_permutation = torch.randperm(n_failure)
-        failure_permutations.append(first_permutation[: n_failure // 2])
-        failure_permutations.append(first_permutation[-(n_failure // 2) :])
-        for i in range(2, calibration_num_permutations):
-            failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
+        # first_permutation = torch.randperm(n_failure)
+        # failure_permutations.append(first_permutation[: n_failure // 2])
+        # failure_permutations.append(first_permutation[-(n_failure // 2) :])
+        # for i in range(2, calibration_num_permutations):
+        #     failure_permutations.append(torch.randperm(n_failure)[: n_failure // 2])
+
+        for i in range(calibration_num_permutations):
+            failure_permutations.append(torch.randint(0, n_failure, (n_failure,)))
 
     # If we're doing per-point permutations, assign one point to each permutation
     # overwriting the previous permutations
@@ -152,19 +160,19 @@ def train(
         for i in range(n_failure):
             failure_permutations.append(torch.tensor([i]))
 
-    # Add the permutations to a wandb table
-    if calibrate and not per_point:
-        if calibration_num_permutations >= 2:
-            columns = [f"Permutation member {i}" for i in range(n_failure // 2)]
-        else:
-            columns = [f"Permutation member {i}" for i in range(n_failure)]
+    # # Add the permutations to a wandb table
+    # if calibrate and not per_point:
+    #     if calibration_num_permutations >= 2:
+    #         columns = [f"Permutation member {i}" for i in range(n_failure // 2)]
+    #     else:
+    #         columns = [f"Permutation member {i}" for i in range(n_failure)]
 
-        data = [
-            failure_permutation.cpu().tolist()
-            for failure_permutation in failure_permutations
-        ]
-        table = wandb.Table(data=data, columns=columns)
-        wandb.log({"Failure data permutations": table}, commit=False)
+    #     data = [
+    #         failure_permutation.cpu().tolist()
+    #         for failure_permutation in failure_permutations
+    #     ]
+    #     table = wandb.Table(data=data, columns=columns)
+    #     wandb.log({"Failure data permutations": table}, commit=False)
 
     # Train the model
     pbar = tqdm(range(num_steps))
@@ -188,7 +196,7 @@ def train(
 
         # The first part of the failure loss is the ELBO on each of the failure
         # permutations
-        if calibrate:
+        if calibrate or bagged:
             failure_elbo = torch.tensor(0.0).to(device)
             for j in range(calibration_num_permutations):
                 label = torch.zeros(calibration_num_permutations).to(device)
@@ -208,6 +216,26 @@ def train(
 
             failure_elbo = failure_elbo / calibration_num_permutations
             failure_loss += elbo_weight * failure_elbo
+
+            # Also add regularization between random subsamples
+            if balance:
+                self_regularization = torch.tensor(0.0).to(device)
+                pairs = torch.combinations(torch.arange(calibration_num_permutations))
+                pairs = pairs[torch.randperm(pairs.shape[0])[:1]]
+                pairs = pairs.to(device)
+                for pair in pairs:
+                    label_a = torch.zeros(calibration_num_permutations).to(device)
+                    label_a[pair[0]] = 1.0
+                    label_b = torch.zeros(calibration_num_permutations).to(device)
+                    label_b[pair[1]] = 1.0
+                    dist_a = failure_guide(label_a)
+                    dist_b = failure_guide(label_b)
+                    kl = divergence_fn(dist_a, dist_b)
+
+                    if ~(torch.isnan(kl) | torch.isinf(kl)):
+                        self_regularization += kl
+
+                failure_loss += regularization_weight * self_regularization
         else:
             # If not calibrating, just get the ELBO on the failure observations
             failure_elbo = objective_fn(
@@ -217,7 +245,17 @@ def train(
             )
             failure_loss += elbo_weight * failure_elbo
 
-        # The second part of the failure loss is regularization/calibration
+        # Also make sure the failure distribution can represent the nominal
+        # distribution with a zero label
+        failure_nominal_elbo = objective_fn(
+            failure_guide(torch.zeros(calibration_num_permutations).to(device)),
+            n_nominal,
+            nominal_observations,
+        )
+        if not exclude_nominal:
+            failure_loss += elbo_weight * failure_nominal_elbo
+
+        # Add regularization/calibration
         # There are three cases:
         #   - calibrating (ours): Get the performance of the calibrated label on the
         #     training set
@@ -247,16 +285,6 @@ def train(
                 )
                 failure_loss += regularization_weight * regularization_kl
 
-        # Also make sure the failure distribution can represent the nominal
-        # distribution with a zero label
-        failure_nominal_elbo = objective_fn(
-            failure_guide(torch.zeros(calibration_num_permutations).to(device)),
-            n_nominal,
-            nominal_observations,
-        )
-        if not exclude_nominal:
-            failure_loss += elbo_weight * failure_nominal_elbo
-
         # Optimimze the failure model
         failure_loss.backward()
         failure_grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -267,16 +295,29 @@ def train(
 
         # Evaluate the failure model
         with torch.no_grad():
-            failure_objective_eval = objective_fn(
-                failure_guide(mixture_label),
-                n_failure_eval,
-                failure_observations_eval,
-            )
+            if bagged:
+                bagged_dist = FlowEnsembleDistribution(
+                    failure_guide,
+                    torch.eye(calibration_num_permutations, device=device),
+                    torch.ones(calibration_num_permutations, device=device) / calibration_num_permutations,
+                    torch.tensor(1.0, device=device),
+                )
+                failure_objective_eval = objective_fn(
+                    bagged_dist,
+                    n_failure_eval,
+                    failure_observations_eval,
+                )
+            else:
+                failure_objective_eval = objective_fn(
+                    failure_guide(mixture_label),
+                    n_failure_eval,
+                    failure_observations_eval,
+                )
 
         # Record progress
         if i % plot_every_n == 0 or i == num_steps - 1:
             if calibrate:
-                for _ in range(calibration_steps):
+                for _ in range(calibration_steps):  # TODO make this match in new code!!! and test bagging
                     mixture_label_optimizer.zero_grad()
                     mixture_label_loss = objective_fn(
                         failure_guide(mixture_label), n_failure, failure_observations
@@ -288,13 +329,23 @@ def train(
                     mixture_label_optimizer.step()
 
             with torch.no_grad():
+                if calibrate:
+                    failure_dist = failure_guide(mixture_label)
+                elif bagged:
+                    failure_dist = FlowEnsembleDistribution(
+                        failure_guide,
+                        torch.eye(calibration_num_permutations, device=device),
+                        torch.ones(calibration_num_permutations, device=device) / calibration_num_permutations,
+                        torch.tensor(1.0, device=device),
+                    )
+                else:
+                    failure_dist = failure_guide(
+                        torch.ones(calibration_num_permutations).to(device)
+                    )
+
                 plot_posterior(
                     failure_guide(torch.zeros(calibration_num_permutations).to(device)),
-                    failure_guide(mixture_label)
-                    if calibrate
-                    else failure_guide(
-                        torch.ones(calibration_num_permutations).to(device)
-                    ),
+                    failure_dist,
                     labels=["Nominal", "Failure (calibrated)"],
                     save_file_name=None,
                     save_wandb=True,
@@ -327,6 +378,13 @@ def train(
             )
             if calibrate:
                 failure_dist = failure_guide(mixture_label)
+            elif bagged:
+                failure_dist = FlowEnsembleDistribution(
+                    failure_guide,
+                    torch.eye(calibration_num_permutations, device=device),
+                    torch.ones(calibration_num_permutations, device=device) / calibration_num_permutations,
+                    torch.tensor(1.0, device=device),
+                )
             else:
                 failure_dist = failure_guide(
                     torch.ones(calibration_num_permutations).to(device)
@@ -374,6 +432,12 @@ def train(
                     }
                     if calibrate
                     else {}
+                )
+                | (
+                    {
+                        "Failure/self-KL": self_regularization.detach().cpu().item(),
+                    }
+                    if calibrate and balance else {}
                 )
                 | (
                     {

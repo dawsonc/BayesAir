@@ -2,7 +2,7 @@
 
 # Our approach
 for seed in 0 1 2 3; do
-    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --project-suffix classify-opt --seed $seed &
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --project-suffix speed_test --seed $seed --balance &
 done
 
 # wait;

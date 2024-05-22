@@ -205,6 +205,70 @@ class ConditionalGaussianMixture(LazyDistribution):
         )
 
 
+class FlowEnsembleDistribution(torch.distributions.Distribution):
+    has_rsample = True
+
+    def __init__(self, flow, contexts, weights, temperature):
+        """Initialize the ensemble distribution.
+
+        Args:
+            flow (zuko.core.LazyDistribution): Flow.
+            contexts (torch.Tensor): Contexts for the flow for each mixture component.
+            weights (torch.Tensor): Weights for the mixture distribution.
+            temperature (float): Temperature parameter for temp annealed sampling.
+        """
+        self.flow = flow
+        self.contexts = contexts
+        self.weights = weights
+        if contexts.shape[0] != weights.shape[0]:
+            raise ValueError("Number of contexts must match the number of weights.")
+
+        self.temperature = temperature
+
+    def rsample_and_log_prob(self, sample_shape=torch.Size()):
+        """Sample from the ensemble distribution and return the log probability."""
+        # Get a relaxed sample from the mixture distribution
+        relaxed_sample = torch.distributions.RelaxedOneHotCategorical(
+            self.temperature, self.weights
+        )
+        relaxed_sample = relaxed_sample.rsample(sample_shape)
+
+        # Get the samples from the flows
+        component_distribution = self.flow(self.contexts)
+        samples, logprobs = component_distribution.rsample_and_log_prob(sample_shape)
+        # samples will be [*sample_shape, self.contexts.shape[0], flow.event_shape]
+        # logprobs will be [*sample_shape, self.contexts.shape[0]]
+
+        # Combine the samples according to the mixture weights
+        samples = torch.einsum("...i, ...ij -> ...j", relaxed_sample, samples)
+
+        # Compute the probability (have to exponentiate, then sum, then log)
+        logprobs = torch.logsumexp(logprobs + torch.log(self.weights), dim=-1)
+
+        return samples, logprobs
+
+    def log_prob(self, value):
+        """Compute the log probability of a value."""
+        # Add a batch dimension if necessary
+        if value.dim() == 1:
+            value = value.unsqueeze(0)
+
+        component_distribution = self.flow(self.contexts)
+        logprobs = component_distribution.log_prob(
+            value.reshape(value.shape[0], 1, *value.shape[1:])
+        )
+        # logprobs will be [value.shape[0], self.contexts.shape[0]]
+
+        # Compute the probability (have to sum, then log)
+        logprobs = torch.logsumexp(logprobs + torch.log(self.weights), dim=-1)
+
+        return logprobs
+
+    def rsample(self, sample_shape=torch.Size()):
+        """Sample from the distribution."""
+        return self.rsample_and_log_prob(sample_shape)[0]
+
+
 if __name__ == "__main__":
     # Test sinkhorn and mmd
     import matplotlib.pyplot as plt

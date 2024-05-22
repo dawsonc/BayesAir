@@ -34,6 +34,8 @@ from scripts.utils import kl_divergence, ConditionalGaussianMixture
 @option("--per-point", is_flag=True, help="If set, run with a permutation for each day")
 @option("--n-failure-eval", default=2, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
+@option("--balance", is_flag=True, help="Balance CalNF")
+@option("--bagged", is_flag=True, help="Use bootstrap aggregation")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--gmm", is_flag=True, help="Use GMM instead of NF")
@@ -107,6 +109,8 @@ def run(
     per_point,
     n_failure_eval,
     no_calibrate,
+    balance,
+    bagged,
     regularize,
     wasserstein,
     gmm,
@@ -556,12 +560,14 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "balanced_" if balance else ""
+    run_name += "bagged_" if bagged else ""
     run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else ""
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project=f"wn-{project_suffix}",
+        project=f"new-wn-{project_suffix}",
         name=run_name,
         group=run_name,
         config={
@@ -661,6 +667,8 @@ def run(
         exclude_nominal=exclude_nominal,
         per_point=per_point,
         score_fn=score_fn,
+        balance=balance,
+        bagged=bagged,
     )
 
 

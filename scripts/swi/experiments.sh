@@ -1,15 +1,15 @@
 # Run experiments for the seismic wave inversion problem
 
 for seed in 0 1 2 3; do
-    # Our approach
-    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --project-suffix classify-opt --seed $seed &
+    # Our approach balanced
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --project-suffix classify-opt --balance --seed $seed &
 done
 
 wait;
 
 for seed in 0 1 2 3; do
-    # Our approach
-    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --project-suffix classify-opt --gmm --seed $seed &
+    # Ensemble
+    CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --project-suffix classify-opt --seed $seed --no-calibrate --bagged &
 done
 
 wait;

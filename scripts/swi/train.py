@@ -20,6 +20,8 @@ from scripts.utils import kl_divergence, ConditionalGaussianMixture
 @option("--n-failure", default=4, help="# of failure examples for training")
 @option("--n-failure-eval", default=500, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
+@option("--balance", is_flag=True, help="Balance CalNF")
+@option("--bagged", is_flag=True, help="Bootstrap aggregation")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--gmm", is_flag=True, help="Use GMM instead of NF")
@@ -84,6 +86,8 @@ def run(
     n_failure,
     n_failure_eval,
     no_calibrate,
+    balance,
+    bagged,
     regularize,
     wasserstein,
     gmm,
@@ -115,13 +119,14 @@ def run(
     # Parse arguments
     calibrate = not no_calibrate
 
-    # Generate data (use the same seed for all runs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.manual_seed(0)
-    pyro.set_rng_seed(0)
+    torch.manual_seed(seed)
+    pyro.set_rng_seed(seed)
 
     # Generate training data
     with torch.no_grad():
+        # Generate the data for the nominal and failure cases
+        observation_noise_scale = 1e-2
         profile_background = torch.zeros(NY_COARSE, NX_COARSE, device=device)
 
         # Nominal has a layer of higher vp, vs, and rho in the middle
@@ -133,15 +138,6 @@ def run(
         # profile_nominal[:, 3:6, :1] -= fracture_variation
         # profile_nominal[:, 4:7, 9:] -= fracture_variation
         profile_nominal += 0.3 * torch.randn_like(profile_nominal)
-
-        # Failure has a break in the middle of the layer
-        profile_failure = profile_background.expand(n_failure, -1, -1).clone()
-        profile_failure[:, 3:6, 0:4] = 1.0
-        profile_failure[:, 4:7, 6:10] = 1.0
-        profile_failure += 0.3 * torch.randn_like(profile_failure)
-
-        # Generate the data for the nominal and failure cases
-        observation_noise_scale = 1e-2
 
         nominal_observations = []
         for i in range(n_nominal):
@@ -156,6 +152,29 @@ def run(
                 )
             )
         nominal_observations = torch.cat(nominal_observations)
+
+        n_nominal_eval = n_failure_eval
+        profile_nominal_eval = profile_background.expand(n_nominal_eval, -1, -1).clone()
+        profile_nominal_eval[:, 3:6, 1:9] = 1.0
+        profile_nominal_eval += 0.3 * torch.randn_like(profile_nominal_eval)
+
+        nominal_observations_eval = []
+        for i in range(n_nominal_eval):
+            nominal_model = pyro.poutine.condition(
+                seismic_model, data={"profile": profile_nominal_eval[i]}
+            )
+            nominal_observations_eval.append(
+                nominal_model(
+                    N=1, observation_noise_scale=observation_noise_scale, device=device
+                )
+            )
+        nominal_observations_eval = torch.cat(nominal_observations_eval)
+
+        # Failure has a break in the middle of the layer
+        profile_failure = profile_background.expand(n_failure, -1, -1).clone()
+        profile_failure[:, 3:6, 0:4] = 1.0
+        profile_failure[:, 4:7, 6:10] = 1.0
+        profile_failure += 0.3 * torch.randn_like(profile_failure)
 
         failure_observations = []
         for i in range(n_failure):
@@ -186,27 +205,6 @@ def run(
                 )
             )
         failure_observations_eval = torch.cat(failure_observations_eval)
-
-        n_nominal_eval = n_failure_eval
-        profile_nominal_eval = profile_background.expand(n_nominal_eval, -1, -1).clone()
-        profile_nominal_eval[:, 3:6, 1:9] = 1.0
-        profile_nominal_eval += 0.3 * torch.randn_like(profile_nominal_eval)
-
-        nominal_observations_eval = []
-        for i in range(n_nominal_eval):
-            nominal_model = pyro.poutine.condition(
-                seismic_model, data={"profile": profile_nominal_eval[i]}
-            )
-            nominal_observations_eval.append(
-                nominal_model(
-                    N=1, observation_noise_scale=observation_noise_scale, device=device
-                )
-            )
-        nominal_observations_eval = torch.cat(nominal_observations_eval)
-
-    # Vary the seed for training
-    torch.manual_seed(seed)
-    pyro.set_rng_seed(seed)
 
     # Make the objective and divergence closures
     def single_particle_elbo(guide_dist, n, obs):
@@ -321,12 +319,14 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "balanced_" if balance else ""
+    run_name += "bagged_" if bagged else ""
     run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else ""
     if regularize:
         run_name += "kl_regularized_kl" if not wasserstein else "w2_regularized"
     wandb.init(
-        project=f"swi-{project_suffix}",
+        project=f"swi-{project_suffix}",  # TODO
         name=run_name,
         group=run_name,
         config={
@@ -421,6 +421,8 @@ def run(
         plot_every_n=n_steps,
         exclude_nominal=exclude_nominal,
         score_fn=score_fn,
+        balance=balance,
+        bagged=bagged,
     )
 
 

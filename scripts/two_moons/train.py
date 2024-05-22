@@ -20,6 +20,8 @@ from scripts.utils import kl_divergence, ConditionalGaussianMixture
 @option("--n-failure", default=20, help="# of failure examples for training")
 @option("--n-failure-eval", default=1000, help="# of failure examples for evaluation")
 @option("--no-calibrate", is_flag=True, help="Don't use calibration")
+@option("--balance", is_flag=True, help="Balance CalNF")
+@option("--bagged", is_flag=True, help="Bootstrap aggregation")
 @option("--regularize", is_flag=True, help="Regularize failure using KL wrt nominal")
 @option("--wasserstein", is_flag=True, help="Regularize failure using W2 wrt nominal")
 @option("--gmm", is_flag=True, help="Use GMM instead of NF")
@@ -84,6 +86,8 @@ def run(
     n_failure,
     n_failure_eval,
     no_calibrate,
+    balance,
+    bagged,
     regularize,
     wasserstein,
     gmm,
@@ -230,41 +234,43 @@ def run(
     # Start wandb
     run_name = run_prefix
     run_name += "ours_" if (calibrate and not regularize) else ""
+    run_name += "balanced_" if balance else ""
+    run_name += "bagged_" if bagged else ""
     run_name += "gmm_" if gmm else ""
     run_name += "calibrated_" if calibrate else "uncalibrated_"
     if regularize:
         run_name += "regularized_kl" if not wasserstein else "unregularized_w2"
-    # wandb.init(
-    #     project=f"debug-two-moons-{project_suffix}",
-    #     name=run_name,
-    #     group=run_name,
-    #     config={
-    #         "n_nominal": n_nominal,
-    #         "n_failure": n_failure,
-    #         "n_failure_eval": n_failure_eval,
-    #         "no_calibrate": no_calibrate,
-    #         "regularize": regularize,
-    #         "wasserstein": wasserstein,
-    #         "seed": seed,
-    #         "n_steps": n_steps,
-    #         "lr": lr,
-    #         "lr_gamma": lr_gamma,
-    #         "lr_steps": lr_steps,
-    #         "grad_clip": grad_clip,
-    #         "weight_decay": weight_decay,
-    #         "n_elbo_particles": n_elbo_particles,
-    #         "n_calibration_particles": n_calibration_particles,
-    #         "n_calibration_permutations": n_calibration_permutations,
-    #         "n_divergence_particles": n_divergence_particles,
-    #         "calibration_weight": calibration_weight,
-    #         "regularization_weight": regularization_weight,
-    #         "elbo_weight": elbo_weight,
-    #         "calibration_ub": calibration_ub,
-    #         "calibration_lr": calibration_lr,
-    #         "calibration_substeps": calibration_substeps,
-    #         "exclude_nominal": exclude_nominal,
-    #     },
-    # )
+    wandb.init(
+        project=f"two-moons-{project_suffix}",
+        name=run_name,
+        group=run_name,
+        config={
+            "n_nominal": n_nominal,
+            "n_failure": n_failure,
+            "n_failure_eval": n_failure_eval,
+            "no_calibrate": no_calibrate,
+            "regularize": regularize,
+            "wasserstein": wasserstein,
+            "seed": seed,
+            "n_steps": n_steps,
+            "lr": lr,
+            "lr_gamma": lr_gamma,
+            "lr_steps": lr_steps,
+            "grad_clip": grad_clip,
+            "weight_decay": weight_decay,
+            "n_elbo_particles": n_elbo_particles,
+            "n_calibration_particles": n_calibration_particles,
+            "n_calibration_permutations": n_calibration_permutations,
+            "n_divergence_particles": n_divergence_particles,
+            "calibration_weight": calibration_weight,
+            "regularization_weight": regularization_weight,
+            "elbo_weight": elbo_weight,
+            "calibration_ub": calibration_ub,
+            "calibration_lr": calibration_lr,
+            "calibration_substeps": calibration_substeps,
+            "exclude_nominal": exclude_nominal,
+        },
+    )
 
     # Make a directory for checkpoints if it doesn't already exist
     os.makedirs(f"checkpoints/two_moons/{run_name}_{seed}", exist_ok=True)
@@ -282,8 +288,6 @@ def run(
         failure_guide = zuko.flows.NSF(
             features=2, context=n_calibration_permutations, hidden_features=(64, 64)
         ).to(device)
-
-    import pdb; pdb.set_trace()
 
     # Train the model
     train(
@@ -323,6 +327,8 @@ def run(
         plot_every_n=n_steps,
         exclude_nominal=exclude_nominal,
         score_fn=score_fn,
+        balance=balance,
+        bagged=bagged,
     )
 
     wandb.finish()

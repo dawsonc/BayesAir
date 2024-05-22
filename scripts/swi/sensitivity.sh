@@ -1,18 +1,47 @@
 # Run sensitivity sweep on K for the SWI problem
 
-# for K in 1 2 3 4 5 6 7 8; do
-for K in 5 6 7 8; do
+for K in 2 4 8; do
     for seed in 0 1 2 3; do
-        # CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --seed $seed --project-suffix sensitivity --n-calibration-permutations $K &
-        CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --seed $seed --project-suffix sensitivity --n-calibration-permutations $K --calibration-lr 0.0 --calibration-weight 0.0 &
+        CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --seed $seed --project-suffix neurips-sensitivity --n-steps 250 --n-calibration-permutations $K --balance &
     done
 
-    if (( K % 2 == 0 )); then
-        wait
+    if (( K == 4 )); then
+        wait;
     fi
 done
 
-# # test with no calibration
-# for seed in 0 1 2 3; do
-#     CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/two_moons/train.py --seed $seed --project-suffix sensitivity --n-calibration-permutations 1 --calibration-lr 0 &
-# done
+wait;
+
+for K in 2 4 8; do
+    for seed in 0 1 2 3; do
+        CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --seed $seed --project-suffix neurips-sensitivity --n-steps 250 --n-calibration-permutations $K --balance --regularization-weight 0.0 &
+    done
+
+    if (( K == 4 )); then
+        wait;
+    fi
+done
+
+wait
+
+for K in 2 4 8; do
+    for seed in 0 1 2 3; do
+        CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --seed $seed --project-suffix neurips-sensitivity --n-steps 250 --n-calibration-permutations $K --balance --calibration-weight 0.0 &
+    done
+
+    if (( K == 4 )); then
+        wait;
+    fi
+done
+
+wait
+
+for K in 2 4 8; do
+    for seed in 0 1 2 3; do
+        CUDA_VISIBLE_DEVICES=$seed, poetry run python scripts/swi/train.py --seed $seed --project-suffix neurips-sensitivity --n-steps 250 --n-calibration-permutations $K --balance --calibration-lr 0.0 &
+    done
+
+    if (( K == 4 )); then
+        wait;
+    fi
+done
